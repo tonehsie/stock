@@ -281,7 +281,7 @@ def process_tdcc_dynamic(df_share, df_price, df_sh, dead_chip_str):
     return pd.DataFrame(out)
 
 # ==========================================
-# 其餘處理函式 (全面掛載空表防呆)
+# 其餘處理函式 (全面掛載空表防呆與嚴謹參數)
 # ==========================================
 def process_price(df):
     if df.empty: return pd.DataFrame()
@@ -306,18 +306,27 @@ def process_inst(df):
     pdf = df.pivot_table(index='date', columns='name', values=['buy', 'sell'], fill_value=0).reset_index()
     pdf.columns = ['_'.join(c).strip('_') for c in pdf.columns.values]
     out = pd.DataFrame({'日期': pdf['date']})
-    f_net = (pd.to_numeric(pdf.get('buy_Foreign_Investor',0),0)+pd.to_numeric(pdf.get('buy_Foreign_Dealer_Self',0),0)) - (pd.to_numeric(pdf.get('sell_Foreign_Investor',0),0)+pd.to_numeric(pdf.get('sell_Foreign_Dealer_Self',0),0))
-    out['外資買賣超(張)'] = (f_net / 1000).round().astype(int)
-    it_net = pd.to_numeric(pdf.get('buy_Investment_Trust',0),0) - pd.to_numeric(pdf.get('sell_Investment_Trust',0),0)
-    out['投信買賣超(張)'] = (it_net / 1000).round().astype(int)
-    d_net = (pd.to_numeric(pdf.get('buy_Dealer_self',0),0)+pd.to_numeric(pdf.get('buy_Dealer_Hedging',0),0)) - (pd.to_numeric(pdf.get('sell_Dealer_self',0),0)+pd.to_numeric(pdf.get('sell_Dealer_Hedging',0),0))
-    out['自營買賣超(張)'] = (d_net / 1000).round().astype(int)
+    
+    # 嚴謹轉換：強制轉數字，失敗補 0
+    f_buy = pd.to_numeric(pdf.get('buy_Foreign_Investor',0), errors='coerce').fillna(0) + pd.to_numeric(pdf.get('buy_Foreign_Dealer_Self',0), errors='coerce').fillna(0)
+    f_sell = pd.to_numeric(pdf.get('sell_Foreign_Investor',0), errors='coerce').fillna(0) + pd.to_numeric(pdf.get('sell_Foreign_Dealer_Self',0), errors='coerce').fillna(0)
+    out['外資買賣超(張)'] = ((f_buy - f_sell) / 1000).round().astype(int)
+    
+    it_buy = pd.to_numeric(pdf.get('buy_Investment_Trust',0), errors='coerce').fillna(0)
+    it_sell = pd.to_numeric(pdf.get('sell_Investment_Trust',0), errors='coerce').fillna(0)
+    out['投信買賣超(張)'] = ((it_buy - it_sell) / 1000).round().astype(int)
+    
+    d_buy = pd.to_numeric(pdf.get('buy_Dealer_self',0), errors='coerce').fillna(0) + pd.to_numeric(pdf.get('buy_Dealer_Hedging',0), errors='coerce').fillna(0)
+    d_sell = pd.to_numeric(pdf.get('sell_Dealer_self',0), errors='coerce').fillna(0) + pd.to_numeric(pdf.get('sell_Dealer_Hedging',0), errors='coerce').fillna(0)
+    out['自營買賣超(張)'] = ((d_buy - d_sell) / 1000).round().astype(int)
+    
     out['三大法人買賣超(張)'] = out['外資買賣超(張)'] + out['投信買賣超(張)'] + out['自營買賣超(張)']
     return out.tail(15).sort_values('日期', ascending=False)
 
 def process_fut_inst(df):
     if df.empty: return pd.DataFrame()
-    df['net'] = pd.to_numeric(df['long_open_interest_balance_volume'],0) - pd.to_numeric(df['short_open_interest_balance_volume'],0)
+    # 嚴謹轉換：強制轉數字，失敗補 0
+    df['net'] = pd.to_numeric(df['long_open_interest_balance_volume'], errors='coerce').fillna(0) - pd.to_numeric(df['short_open_interest_balance_volume'], errors='coerce').fillna(0)
     pdf = df.pivot_table(index='date', columns='institutional_investors', values='net', fill_value=0).reset_index()
     for col in ['Foreign_Investor', 'Investment_Trust', 'Dealer']:
         if col not in pdf.columns: pdf[col] = 0
