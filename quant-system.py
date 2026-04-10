@@ -8,13 +8,13 @@ import re
 import concurrent.futures
 
 # 設定網頁標題與佈局
-st.set_page_config(page_title="台股全息量化系統 (全數據霸王版)", layout="wide")
+st.set_page_config(page_title="台股全息量化系統 (全中文霸王版)", layout="wide")
 
 # 內建 Sponsor Token
 FINMIND_TOKEN = "eyJ0eXAiOiJKV1QiLCJhbGciOiJIUzI1NiJ9.eyJkYXRlIjoiMjAyNi0wNC0wOSAxOToxMTo0MiIsInVzZXJfaWQiOiJUb25lMSIsImVtYWlsIjoidG9uZWhzaWVAZ21haWwuY29tIiwiaXAiOiI2MS42Mi43LjE5OCJ9.32OOXXWwga3QGGh5SQe7JHw03wfFfQo4XDohfgSI0d8"
 
 st.title("🤖 交易員實戰手冊：全息量化擷取系統")
-st.markdown("✅ **營收真實月份校正** | ✅ **新增 PE/PB 估值與處置狀態** | ✅ **多線程極速並發**")
+st.markdown("✅ **欄位 100% 繁體中文化** | ✅ **營收真實月份校正** | ✅ **多線程極速並發**")
 
 # UI 輸入區
 col1, col2, col3 = st.columns([1, 1, 2])
@@ -182,13 +182,21 @@ def scrape_fubon_pledge(df_price_raw):
     return df_summary, df_all
 
 def scrape_twse_block(latest_date):
+    """取得證交所鉅額交易，並提取官方中文表頭"""
     try:
         d_str = latest_date.replace("-", "")
-        data = requests.get(f"https://www.twse.com.tw/rwd/zh/block/BFIAUU?date={d_str}&response=json", timeout=8).json()
-        df = pd.DataFrame(data.get("data", []))
+        res = requests.get(f"https://www.twse.com.tw/rwd/zh/block/BFIAUU?date={d_str}&response=json", timeout=8).json()
+        if "data" not in res or not res["data"]: return pd.DataFrame()
+        
+        # 使用證交所回傳的官方中文欄位
+        fields = res.get("fields", [str(i) for i in range(len(res["data"][0]))])
+        df = pd.DataFrame(res["data"], columns=fields)
         df = df[df.apply(lambda row: row.astype(str).str.contains(stock_id).any(), axis=1)]
-        if not df.empty and df.shape[1] >= 10:
-            df.iloc[:, 4] = (pd.to_numeric(df.iloc[:, 4].astype(str).str.replace(',',''), errors='coerce').fillna(0) / 1000).round().astype(int)
+        
+        # 單位校正：股轉張
+        if not df.empty and '成交股數' in df.columns:
+            df['成交張數'] = (pd.to_numeric(df['成交股數'].astype(str).str.replace(',',''), errors='coerce').fillna(0) / 1000).round().astype(int)
+            df = df.drop(columns=['成交股數'])
         return df
     except: return pd.DataFrame()
 
@@ -246,7 +254,7 @@ def process_branch_data(df_raw, period_days, actual_dates):
     return out
 
 # ==========================================
-# 各項資料處理函式
+# 各項資料處理函式 (全中文翻譯)
 # ==========================================
 def process_tdcc(df):
     if df.empty: return df
@@ -263,7 +271,6 @@ def process_tdcc(df):
     df_levels = df[df['HoldingSharesLevel'] != '合計']
     df_pivot = df_levels.pivot(index='date', columns='HoldingSharesLevel', values=['people', 'unit', 'percent']).reset_index()
     
-    # === 語法修復區 ===
     new_cols = []
     for c in df_pivot.columns:
         if c[0] == 'date' or c == 'date':
@@ -272,7 +279,6 @@ def process_tdcc(df):
             metric_name = {'people': '人數', 'unit': '張數', 'percent': '比例(%)'}.get(c[0], c[0])
             new_cols.append(f"{c[1]}_{metric_name}")
     df_pivot.columns = new_cols
-    # ==================
     
     df_out = pd.merge(df_total, df_pivot, on='date', how='left') if not df_total.empty else df_pivot
     if df_total.empty: df_out['總人數(人)'] = 0; df_out['總張數'] = 0
@@ -353,6 +359,30 @@ def process_disp(df):
     df_out = df_out.rename(columns={"date":"公告日期","disposition_cnt":"處置次數","condition":"處置條件","measure":"處置措施","period_start":"處置起日","period_end":"處置迄日"})
     return df_out[['公告日期', '處置次數', '處置起日', '處置迄日', '處置條件', '處置措施']].tail(5).sort_values('公告日期', ascending=False)
 
+def process_div(df):
+    """處理股利資料，中文化欄位"""
+    if df.empty: return df
+    rename_map = {
+        "date": "公告日期", "year": "股利年份", 
+        "StockEarningsDistribution": "盈餘配股(元)", "StockStatutorySurplus": "公積配股(元)", 
+        "CashEarningsDistribution": "盈餘配息(元)", "CashStatutorySurplus": "公積配息(元)"
+    }
+    df_out = df.rename(columns=rename_map)
+    cols = [c for c in ["公告日期", "股利年份", "盈餘配息(元)", "公積配息(元)", "盈餘配股(元)", "公積配股(元)"] if c in df_out.columns]
+    return df_out[cols].tail(10).sort_values('公告日期', ascending=False)
+
+def process_cbas(df):
+    """處理可轉債資料，中文化欄位"""
+    if df.empty: return df
+    rename_map = {
+        "date": "日期", "cb_id": "可轉債代號", "cb_name": "可轉債名稱",
+        "ConversionPrice": "轉換價(元)", "PriceOfUnderlyingStock": "標的股價(元)",
+        "OutstandingAmount": "未償還餘額", "CouponRate": "票面利率(%)"
+    }
+    df_out = df.rename(columns=rename_map)
+    cols = [c for c in ["日期", "可轉債代號", "可轉債名稱", "轉換價(元)", "標的股價(元)", "未償還餘額", "票面利率(%)"] if c in df_out.columns]
+    return df_out[cols]
+
 def format_pledge_to_gas(df_summary, df_detail):
     header = "▼▼▼ 20. 董監大股東質設明細 [來源：富邦證券] ▼▼▼, \n"
     if df_detail is None or df_detail.empty: return header + "本檔股票近 3 年內無董監事或大股東質設紀錄, \n"
@@ -408,8 +438,8 @@ if run_btn:
                 df_rev['revenue'] = (pd.to_numeric(df_rev['revenue'], errors='coerce').fillna(0) / 1000000).round().astype(int)
                 df_rev = df_rev.rename(columns={"revenue":"月營收(百萬元)"})[['營收月份','月營收(百萬元)']].tail(15)
             
-            df_div = fetch_fm("TaiwanStockDividend", "2015-01-01")
-            if not df_div.empty: df_div = df_div.tail(10)
+            # 套用新增的翻譯函式
+            df_div = process_div(fetch_fm("TaiwanStockDividend", "2015-01-01"))
             
             df_per = process_per(fetch_fm("TaiwanStockPER", d_60))
             start_probe_180 = (datetime.date.today() - datetime.timedelta(days=180)).strftime("%Y-%m-%d")
@@ -431,13 +461,16 @@ if run_btn:
                 df_19 = df_b_today[df_b_today.astype(str).apply(lambda x: x.str.contains('|'.join(govs))).any(axis=1)]
 
             df_pledge_summary, df_pledge_detail = scrape_fubon_pledge(df_price_raw)
+            
+            # 套用新增的 CBAS 翻譯函式
             df_cbas_raw = fetch_fm("TaiwanStockConvertibleBondDailyOverview", d_latest, specific_id=False)
-            df_cbas = df_cbas_raw[df_cbas_raw['cb_id'].astype(str).str.startswith(stock_id)] if not df_cbas_raw.empty else pd.DataFrame()
+            df_cbas_filtered = df_cbas_raw[df_cbas_raw['cb_id'].astype(str).str.startswith(stock_id)] if not df_cbas_raw.empty else pd.DataFrame()
+            df_cbas = process_cbas(df_cbas_filtered)
 
             df_fut_inst = process_fut_inst(fetch_fm("TaiwanFuturesInstitutionalInvestors", d_60, specific_id=False, target_id="TX"))
             df_opt_inst = process_opt_inst(fetch_fm("TaiwanOptionInstitutionalInvestors", d_60, specific_id=False, target_id="TXO"))
 
-            st.success(f"✅ 營收月份精準校正完成！")
+            st.success(f"✅ 全中文翻譯完成！所有表頭皆已在地化。")
             def render_html_table(title, df):
                 st.markdown(f"#### {title}")
                 if df is None or df.empty: st.warning("此區塊目前查無數據")
@@ -481,6 +514,7 @@ if run_btn:
             if not bs_diff: st.warning("此區塊目前查無數據")
             else: st.info(f"使用者輸入數值：{bs_diff}")
 
+            # Prompt 區
             st.divider()
             st.subheader("📋 【給 Gemini 的量化分析資料包】")
             st.info("💡 提示：點擊下方黑色區塊右上角的按鈕即可一鍵複製！")
