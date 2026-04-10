@@ -262,11 +262,18 @@ def process_tdcc(df):
     df_total = df[df['HoldingSharesLevel'] == '合計'][['date', 'people', 'unit']].rename(columns={'people': '總人數(人)', 'unit': '總張數'})
     df_levels = df[df['HoldingSharesLevel'] != '合計']
     df_pivot = df_levels.pivot(index='date', columns='HoldingSharesLevel', values=['people', 'unit', 'percent']).reset_index()
+    
+    # === 語法修復區 ===
     new_cols = []
     for c in df_pivot.columns:
-        if c[0] == 'date' or c == 'date': new_cols.append('date')
-        else: new_cols.append(f"{c[1]}_{{'people': '人數', 'unit': '張數', 'percent': '比例(%)'}.get(c[0], c[0])}")
+        if c[0] == 'date' or c == 'date':
+            new_cols.append('date')
+        else:
+            metric_name = {'people': '人數', 'unit': '張數', 'percent': '比例(%)'}.get(c[0], c[0])
+            new_cols.append(f"{c[1]}_{metric_name}")
     df_pivot.columns = new_cols
+    # ==================
+    
     df_out = pd.merge(df_total, df_pivot, on='date', how='left') if not df_total.empty else df_pivot
     if df_total.empty: df_out['總人數(人)'] = 0; df_out['總張數'] = 0
     df_out = df_out.rename(columns={'date': '日期'}).sort_values('日期', ascending=False)
@@ -370,7 +377,6 @@ if run_btn:
             d_latest = actual_dates[0]
             d_60 = actual_dates[59] if len(actual_dates) >= 60 else actual_dates[-1]
 
-            # 基礎個股資料
             df_share = process_tdcc(fetch_fm("TaiwanStockHoldingSharesPer", d_60))
             df_twse = scrape_twse_block(d_latest)
             df_margin = process_margin(fetch_fm("TaiwanStockMarginPurchaseShortSale", d_60))
@@ -398,7 +404,6 @@ if run_btn:
             df_rev = pd.DataFrame()
             if not df_rev_raw.empty:
                 df_rev = df_rev_raw.copy()
-                # 關鍵修復：利用 revenue_year 和 revenue_month 組合出正確的真實營收月份
                 df_rev['營收月份'] = df_rev['revenue_year'].astype(str) + "-" + df_rev['revenue_month'].astype(str).str.zfill(2)
                 df_rev['revenue'] = (pd.to_numeric(df_rev['revenue'], errors='coerce').fillna(0) / 1000000).round().astype(int)
                 df_rev = df_rev.rename(columns={"revenue":"月營收(百萬元)"})[['營收月份','月營收(百萬元)']].tail(15)
@@ -410,7 +415,6 @@ if run_btn:
             start_probe_180 = (datetime.date.today() - datetime.timedelta(days=180)).strftime("%Y-%m-%d")
             df_disp = process_disp(fetch_fm("TaiwanStockDispositionSecuritiesPeriod", start_probe_180))
 
-            # 分點資料
             dates_to_fetch = actual_dates[:60]
             df_branch_raw = fetch_fm_branch_fast_parallel(dates_to_fetch)
             df_b_today = process_branch_data(df_branch_raw, 1, actual_dates)
@@ -433,7 +437,6 @@ if run_btn:
             df_fut_inst = process_fut_inst(fetch_fm("TaiwanFuturesInstitutionalInvestors", d_60, specific_id=False, target_id="TX"))
             df_opt_inst = process_opt_inst(fetch_fm("TaiwanOptionInstitutionalInvestors", d_60, specific_id=False, target_id="TXO"))
 
-            # UI 顯示
             st.success(f"✅ 營收月份精準校正完成！")
             def render_html_table(title, df):
                 st.markdown(f"#### {title}")
@@ -478,7 +481,6 @@ if run_btn:
             if not bs_diff: st.warning("此區塊目前查無數據")
             else: st.info(f"使用者輸入數值：{bs_diff}")
 
-            # Prompt 區
             st.divider()
             st.subheader("📋 【給 Gemini 的量化分析資料包】")
             st.info("💡 提示：點擊下方黑色區塊右上角的按鈕即可一鍵複製！")
