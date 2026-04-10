@@ -14,7 +14,7 @@ st.set_page_config(page_title="台股全息量化系統 (雙軸大戶鎖碼版)"
 FINMIND_TOKEN = "eyJ0eXAiOiJKV1QiLCJhbGciOiJIUzI1NiJ9.eyJkYXRlIjoiMjAyNi0wNC0xMCAyMDoyMDo0NiIsInVzZXJfaWQiOiJUb25lMSIsImVtYWlsIjoidG9uZWhzaWVAZ21haWwuY29tIiwiaXAiOiI2MS42Mi43LjE5OCJ9.7s3-IrkfdiUyTvGiZQGESBUBAPHQTnd4pwYcn8_J-CY"
 
 st.title("🤖 交易員實戰手冊：全息量化擷取系統")
-st.markdown("✅ **數學暴力解析(絕對防騙)** | ✅ **雙軸大戶 C-Value 引擎** | ✅ **全面防呆與多線程**")
+st.markdown("✅ **數學暴力解析(絕對防呆)** | ✅ **雙軸大戶 C-Value 引擎** | ✅ **去除 API 重複值干擾**")
 
 # UI 輸入區 (加入自訂雙軸參數)
 col1, col2, col3, col4, col5 = st.columns([1, 1, 1, 1, 1])
@@ -56,6 +56,11 @@ def format_to_gas(df, title):
     csv_str = df.to_csv(index=False)
     lines = [line.replace('"', '') + ", " for line in csv_str.strip().split('\n')]
     return header + "\n".join(lines) + "\n"
+
+def format_pledge_to_gas(df_summary, df_detail):
+    if df_summary is None or df_summary.empty:
+        return "▼▼▼ 7. 董監大股東質設 ▼▼▼, \n此區塊查無最新數據或無發行紀錄, \n"
+    return format_to_gas(df_summary, "7. 董監大股東質設")
 
 # ==========================================
 # 資料清洗與爬蟲引擎
@@ -205,22 +210,24 @@ def process_branch_data(df_raw, period_days, actual_dates):
     return out
 
 # ==========================================
-# 核心大戶加總邏輯優化 (C-Value 整合版)
+# 核心大戶加總邏輯優化 (防呆升級版)
 # ==========================================
 def clean_level_by_math(x):
-    """📌 暴力數學解析器：無視 API 格式改變，直接萃取上限股數判斷級距"""
     s = str(x).replace(',', '').replace(' ', '')
-    if s in ["17", "17.0", "合計", "總計"]: return "合計"
+    if '合計' in s or '總計' in s or s in ["17", "17.0", "99", "99.0"]: return "合計"
+    if '差異' in s or s in ["16", "16.0"]: return "差異數"
     
     nums = re.findall(r'\d+', s)
-    if not nums: return s
+    if not nums: return "合計"
     
-    if len(nums) == 1 and int(nums[0]) <= 15:
-        mapping = {1: "1-999股", 2: "1-5張", 3: "5-10張", 4: "10-15張", 5: "15-20張", 6: "20-30張", 7: "30-40張", 8: "40-50張", 9: "50-100張", 10: "100-200張", 11: "200-400張", 12: "400-600張", 13: "600-800張", 14: "800-1000張", 15: "1000張以上"}
-        return mapping.get(int(nums[0]), s)
-        
+    if len(nums) == 1:
+        val = int(nums[0])
+        if 1 <= val <= 15:
+            mapping = {1: "1-999股", 2: "1-5張", 3: "5-10張", 4: "10-15張", 5: "15-20張", 6: "20-30張", 7: "30-40張", 8: "40-50張", 9: "50-100張", 10: "100-200張", 11: "200-400張", 12: "400-600張", 13: "600-800張", 14: "800-1000張", 15: "1000張以上"}
+            return mapping.get(val, "合計")
+        else: return "合計"
+            
     upper_bound = int(nums[-1])
-    
     if upper_bound <= 999: return "1-999股"
     elif upper_bound <= 5000: return "1-5張"
     elif upper_bound <= 10000: return "5-10張"
@@ -239,21 +246,28 @@ def clean_level_by_math(x):
 
 def process_tdcc(df):
     if df.empty: return pd.DataFrame()
-    df = df[~df['HoldingSharesLevel'].astype(str).str.contains('差異數')]
     df['LevelClean'] = df['HoldingSharesLevel'].apply(clean_level_by_math)
+    
+    # 📌 雙重防呆：過濾無用級別，並強制刪除 API 偶爾吐出的重複資料
+    df = df[~df['LevelClean'].str.contains('合計|總計|差異數', na=False)]
+    df = df.drop_duplicates(subset=['date', 'LevelClean'], keep='last')
+    
     df['people'] = pd.to_numeric(df['people'], errors='coerce').fillna(0).astype(int)
     df['percent'] = pd.to_numeric(df['percent'], errors='coerce').fillna(0)
     df['unit'] = (pd.to_numeric(df.get('unit', 0), errors='coerce').fillna(0) / 1000).round().astype(int)
+    
     dates = sorted(df['date'].unique(), reverse=True)[:5]
     df = df[df['date'].isin(dates)]
-    df_levels = df[~df['LevelClean'].str.contains('合計|總計')]
-    df_total = df_levels.groupby('date')[['people', 'unit']].sum().reset_index().rename(columns={'people': '總人數(人)', 'unit': '總張數'})
-    df_pivot = df_levels.pivot(index='date', columns='LevelClean', values=['people', 'unit', 'percent']).reset_index()
+    
+    df_total = df.groupby('date')[['people', 'unit']].sum().reset_index().rename(columns={'people': '總人數(人)', 'unit': '總張數'})
+    df_pivot = df.pivot(index='date', columns='LevelClean', values=['people', 'unit', 'percent']).reset_index()
+    
     new_cols = ['date']
     for c in df_pivot.columns[1:]:
         m_name = {'people': '人數', 'unit': '張數', 'percent': '比例(%)'}.get(c[0], c[0])
         new_cols.append(f"{c[1]}_{m_name}")
     df_pivot.columns = new_cols
+    
     df_out = pd.merge(df_total, df_pivot, on='date', how='left').rename(columns={'date': '日期'}).sort_values('日期', ascending=False)
     return df_out
 
@@ -275,8 +289,6 @@ def process_tdcc_dynamic(df_share, df_price, dead_chip_str, base_money_str, infl
         p = row['收盤價(元)']
         if pd.isna(p) or p == 0: continue
         total_units = row.get('總張數', 0)
-        
-        # 絕對使用實際股數(總張數)回推股本與影響力，不牽涉股價市值
         cap_b = total_units / 10000 
         
         money_threshold = (base_money_wan * 10000) / (p * 1000)
@@ -298,7 +310,6 @@ def process_tdcc_dynamic(df_share, df_price, dead_chip_str, base_money_str, infl
         elif ceiling_t <= 800: large_cols = ['800-1000張_比例(%)', '1000張以上_比例(%)']
         else: large_cols = ['1000張以上_比例(%)']
 
-        # 安全防錯的佔比加總邏輯
         large_pct = 0.0
         for c in large_cols:
             val = row.get(c, 0)
@@ -414,7 +425,7 @@ if run_btn:
         df_pledge_summary, df_pledge_detail = scrape_fubon_pledge(df_price_raw)
         df_fut = process_fut_inst(fetch_fm("TaiwanFuturesInstitutionalInvestors", d_60, specific_id=False, target_id="TX"))
 
-        st.success("✅ 雙軸 C-Value 引擎運算完畢！數學解析器已攔截格式干擾。")
+        st.success("✅ 雙軸 C-Value 引擎運算完畢！數學解析器已過濾重複格式干擾。")
         def show(title, df):
             st.markdown(f"#### {title}")
             if df is None or df.empty: st.warning("此區塊查無數據")
@@ -440,6 +451,6 @@ if run_btn:
         p += format_to_gas(df_inst, "4. 法人買賣超")
         p += format_to_gas(df_price, "5. 收盤價量")
         p += format_to_gas(df_b_today, "6. 今日主力分點")
-        p += format_to_gas(df_pledge_summary, "7. 董監大股東質設")
+        p += format_pledge_to_gas(df_pledge_summary, df_pledge_detail)
         p += format_to_gas(df_fut, "8. 大盤期貨籌碼")
         st.code(p, language="text")
