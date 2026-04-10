@@ -14,7 +14,7 @@ st.set_page_config(page_title="台股全息量化系統 (動態大戶精算版)"
 FINMIND_TOKEN = "eyJ0eXAiOiJKV1QiLCJhbGciOiJIUzI1NiJ9.eyJkYXRlIjoiMjAyNi0wNC0xMCAyMDoyMDo0NiIsInVzZXJfaWQiOiJUb25lMSIsImVtYWlsIjoidG9uZWhzaWVAZ21haWwuY29tIiwiaXAiOiI2MS42Mi43LjE5OCJ9.7s3-IrkfdiUyTvGiZQGESBUBAPHQTnd4pwYcn8_J-CY"
 
 st.title("🤖 交易員實戰手冊：全息量化擷取系統")
-st.markdown("✅ **動態精算容錯機制 (無股本也能算)** | ✅ **100% 繁體中文化** | ✅ **多線程極速並發**")
+st.markdown("✅ **集保格式變更自適應修復** | ✅ **自體加總防呆機制** | ✅ **多線程極速並發**")
 
 # UI 輸入區
 col1, col2, col3 = st.columns([1, 1, 2])
@@ -255,16 +255,43 @@ def process_branch_data(df_raw, period_days, actual_dates):
 def process_tdcc(df):
     if df.empty: return df
     df = df[~df['HoldingSharesLevel'].astype(str).str.contains('差異數')]
-    level_map = {"1":"1-999股", "1.0":"1-999股", "2":"1-5張", "2.0":"1-5張", "3":"5-10張", "3.0":"5-10張", "4":"10-15張", "4.0":"10-15張", "5":"15-20張", "5.0":"15-20張", "6":"20-30張", "6.0":"20-30張", "7":"30-40張", "7.0":"30-40張", "8":"40-50張", "8.0":"40-50張", "9":"50-100張", "9.0":"50-100張", "10":"100-200張", "10.0":"100-200張", "11":"200-400張", "11.0":"200-400張", "12":"400-600張", "12.0":"400-600張", "13":"600-800張", "13.0":"600-800張", "14":"800-1000張", "14.0":"800-1000張", "15":"1000張以上", "15.0":"1000張以上", "17":"合計", "17.0":"合計"}
-    df['HoldingSharesLevel'] = df['HoldingSharesLevel'].astype(str).map(level_map).fillna(df['HoldingSharesLevel'])
+    
+    # 📌 【萬能翻譯字典】相容 FinMind 舊版代碼 (1~17) 與新版字串 (1,000-5,000)
+    level_map = {
+        "1":"1-999股", "1.0":"1-999股", "1-999":"1-999股", 
+        "2":"1-5張", "2.0":"1-5張", "1,000-5,000":"1-5張", "1000-5000":"1-5張",
+        "3":"5-10張", "3.0":"5-10張", "5,001-10,000":"5-10張", "5001-10000":"5-10張",
+        "4":"10-15張", "4.0":"10-15張", "10,001-15,000":"10-15張", "10001-15000":"10-15張",
+        "5":"15-20張", "5.0":"15-20張", "15,001-20,000":"15-20張", "15001-20000":"15-20張",
+        "6":"20-30張", "6.0":"20-30張", "20,001-30,000":"20-30張", "20001-30000":"20-30張",
+        "7":"30-40張", "7.0":"30-40張", "30,001-40,000":"30-40張", "30001-40000":"30-40張",
+        "8":"40-50張", "8.0":"40-50張", "40,001-50,000":"40-50張", "40001-50000":"40-50張",
+        "9":"50-100張", "9.0":"50-100張", "50,001-100,000":"50-100張", "50001-100000":"50-100張",
+        "10":"100-200張", "10.0":"100-200張", "100,001-200,000":"100-200張", "100001-200000":"100-200張",
+        "11":"200-400張", "11.0":"200-400張", "200,001-400,000":"200-400張", "200001-400000":"200-400張",
+        "12":"400-600張", "12.0":"400-600張", "400,001-600,000":"400-600張", "400001-600000":"400-600張",
+        "13":"600-800張", "13.0":"600-800張", "600,001-800,000":"600-800張", "600001-800000":"600-800張",
+        "14":"800-1000張", "14.0":"800-1000張", "800,001-1,000,000":"800-1000張", "800001-1000000":"800-1000張",
+        "15":"1000張以上", "15.0":"1000張以上", "1,000,001以上":"1000張以上", "1000001以上":"1000張以上",
+        "17":"合計", "17.0":"合計", "總計":"合計"
+    }
+    df['HoldingSharesLevel'] = df['HoldingSharesLevel'].astype(str).str.strip().map(level_map).fillna(df['HoldingSharesLevel'])
+    
     df['people'] = pd.to_numeric(df['people'], errors='coerce').fillna(0).astype(int)
     df['percent'] = pd.to_numeric(df['percent'], errors='coerce').fillna(0).round().astype(int)
-    if 'unit' in df.columns: df['unit'] = (pd.to_numeric(df['unit'], errors='coerce').fillna(0) / 1000).round().astype(int)
-    else: df['unit'] = 0
+    if 'unit' in df.columns: 
+        df['unit'] = (pd.to_numeric(df['unit'], errors='coerce').fillna(0) / 1000).round().astype(int)
+    else: 
+        df['unit'] = 0
+        
     latest_dates = sorted(df['date'].unique(), reverse=True)[:5]
     df = df[df['date'].isin(latest_dates)]
-    df_total = df[df['HoldingSharesLevel'] == '合計'][['date', 'people', 'unit']].rename(columns={'people': '總人數(人)', 'unit': '總張數'})
+    
+    # 📌 【自體加總防呆】強制剃除官方的「合計」，由程式自動加總確保絕不遺漏總數！
     df_levels = df[df['HoldingSharesLevel'] != '合計']
+    df_total = df_levels.groupby('date')[['people', 'unit']].sum().reset_index()
+    df_total = df_total.rename(columns={'people': '總人數(人)', 'unit': '總張數'})
+    
     df_pivot = df_levels.pivot(index='date', columns='HoldingSharesLevel', values=['people', 'unit', 'percent']).reset_index()
     
     new_cols = []
@@ -276,21 +303,21 @@ def process_tdcc(df):
             new_cols.append(f"{c[1]}_{metric_name}")
     df_pivot.columns = new_cols
     
-    df_out = pd.merge(df_total, df_pivot, on='date', how='left') if not df_total.empty else df_pivot
-    if df_total.empty: df_out['總人數(人)'] = 0; df_out['總張數'] = 0
+    df_out = pd.merge(df_total, df_pivot, on='date', how='left')
     df_out = df_out.rename(columns={'date': '日期'}).sort_values('日期', ascending=False)
+    
     level_order = ['1-999股', '1-5張', '5-10張', '10-15張', '15-20張', '20-30張', '30-40張', '40-50張', '50-100張', '100-200張', '200-400張', '400-600張', '600-800張', '800-1000張', '1000張以上']
     ordered_cols = ['日期', '總人數(人)', '總張數'] + [f"{lvl}_{m}" for lvl in level_order for m in ['人數', '張數', '比例(%)']]
+    
     final_cols = [c for c in ordered_cols if c in df_out.columns]
     for c in df_out.columns:
         if c not in final_cols: final_cols.append(c)
     return df_out[final_cols]
 
 def process_tdcc_dynamic(df_share_expanded, df_price, is_blue_chip):
-    """【容錯防呆版】基於總張數換算股本的動態大戶精算表"""
+    """基於總張數換算股本的動態大戶精算表"""
     if df_share_expanded.empty or df_price.empty: return pd.DataFrame()
     
-    # 日期對齊防呆
     df_share_expanded['日期_dt'] = pd.to_datetime(df_share_expanded['日期'])
     df_price['日期_dt'] = pd.to_datetime(df_price['日期'])
     df_share_sorted = df_share_expanded.sort_values('日期_dt')
@@ -310,14 +337,10 @@ def process_tdcc_dynamic(df_share_expanded, df_price, is_blue_chip):
         total_units = row.get('總張數', 0)
         if pd.isna(total_units): total_units = 0
         
-        # 如果當天完全沒有價格資料，無法估算門檻，才跳過
         if pd.isna(p) or p == 0:
             continue
             
-        # 股本換算，若無資料則為 0
         capital_billion = (total_units / 10000) if total_units > 0 else 0
-        
-        # 取最大值邏輯：即使 total_units 為 0，依然能用 money_threshold 算出門檻
         weight = 1.5 if is_blue_chip else 1.0
         money_threshold = 50000 / p if p > 0 else 0
         influence_threshold = total_units * 0.0005 if total_units > 0 else 0
@@ -337,7 +360,6 @@ def process_tdcc_dynamic(df_share_expanded, df_price, is_blue_chip):
         elif closest_t <= 800: large_pct = sum([pd.to_numeric(row.get(f"{lvl}_比例(%)", 0), errors='coerce') for lvl in ['800-1000張', '1000張以上']])
         else: large_pct = pd.to_numeric(row.get('1000張以上_比例(%)', 0), errors='coerce')
         
-        # 處理可能的 NaN
         retail_pct = 0 if pd.isna(retail_pct) else retail_pct
         large_pct = 0 if pd.isna(large_pct) else large_pct
             
@@ -462,7 +484,7 @@ if run_btn:
             d_latest = actual_dates[0]
             d_60 = actual_dates[59] if len(actual_dates) >= 60 else actual_dates[-1]
 
-            # 集保處理 (包含容錯防呆設計)
+            # 集保處理 (包含格式相容與自體加總機制)
             df_share_expanded = process_tdcc(fetch_fm("TaiwanStockHoldingSharesPer", d_60))
             df_price = process_price(df_price_raw)
             df_share_dynamic = process_tdcc_dynamic(df_share_expanded, df_price, is_blue_chip)
@@ -525,7 +547,7 @@ if run_btn:
             df_fut_inst = process_fut_inst(fetch_fm("TaiwanFuturesInstitutionalInvestors", d_60, specific_id=False, target_id="TX"))
             df_opt_inst = process_opt_inst(fetch_fm("TaiwanOptionInstitutionalInvestors", d_60, specific_id=False, target_id="TXO"))
 
-            st.success(f"✅ 全資料擷取完畢！防呆容錯機制已啟動。")
+            st.success(f"✅ 全資料擷取完畢！格式自適應已啟動，動態精算無漏接。")
             def render_html_table(title, df):
                 st.markdown(f"#### {title}")
                 if df is None or df.empty: st.warning("此區塊目前查無數據")
