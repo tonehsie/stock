@@ -14,7 +14,7 @@ st.set_page_config(page_title="台股全息量化系統 (活大戶鎖碼版)", l
 FINMIND_TOKEN = "eyJ0eXAiOiJKV1QiLCJhbGciOiJIUzI1NiJ9.eyJkYXRlIjoiMjAyNi0wNC0xMCAyMDoyMDo0NiIsInVzZXJfaWQiOiJUb25lMSIsImVtYWlsIjoidG9uZWhzaWVAZ21haWwuY29tIiwiaXAiOiI2MS42Mi43LjE5OCJ9.7s3-IrkfdiUyTvGiZQGESBUBAPHQTnd4pwYcn8_J-CY"
 
 st.title("🤖 交易員實戰手冊：全息量化擷取系統")
-st.markdown("✅ **活大戶影響力 C-Value 引擎** | ✅ **100/400/1000 動態門檻** | ✅ **多線程極速並發**")
+st.markdown("✅ **活大戶影響力 C-Value 引擎** | ✅ **全面空表防呆機制** | ✅ **多線程極速並發**")
 
 # UI 輸入區
 col1, col2, col3, col4 = st.columns([1, 1, 1, 2])
@@ -204,7 +204,7 @@ def process_branch_data(df_raw, period_days, actual_dates):
 # 核心大戶加總邏輯優化 (V29 活大戶鎖碼版)
 # ==========================================
 def process_tdcc(df):
-    if df.empty: return df
+    if df.empty: return pd.DataFrame()
     df = df[~df['HoldingSharesLevel'].astype(str).str.contains('差異數')]
     l_map = {"1":"1-999股", "2":"1-5張", "3":"5-10張", "4":"10-15張", "5":"15-20張", "6":"20-30張", "7":"30-40張", "8":"40-50張", "9":"50-100張", "10":"100-200張", "11":"200-400張", "12":"400-600張", "13":"600-800張", "14":"800-1000張", "15":"1000張以上"}
     df['LevelClean'] = df['HoldingSharesLevel'].astype(str).str.strip().map(l_map).fillna(df['HoldingSharesLevel'])
@@ -226,10 +226,9 @@ def process_tdcc(df):
     return df_out
 
 def process_tdcc_dynamic(df_share, df_price, df_sh, dead_chip_str):
-    """【V29】活大戶 C-Value 實戰引擎"""
+    """活大戶 C-Value 實戰引擎"""
     if df_share.empty or df_price.empty: return pd.DataFrame()
     
-    # 處理死籌碼輸入
     try: dead_chip_pct = float(dead_chip_str) / 100.0 if dead_chip_str else 0.0
     except: dead_chip_pct = 0.0
     
@@ -245,19 +244,17 @@ def process_tdcc_dynamic(df_share, df_price, df_sh, dead_chip_str):
         
         cap_b = official_shares / 10000000 if official_shares > 0 else total_units / 10000
         
-        # 1. 實戰三步判定：定門檻
+        # 實戰三步判定：定門檻
         if p > 500 or cap_b < 10: closest_t = 100
         elif p >= 100 or cap_b <= 50: closest_t = 400
         else: closest_t = 1000
         
-        # 2. 動態加總大戶佔比
         large_pct = 0
         for col in [c for c in row.index if '比例(%)' in str(c)]:
             nums = re.findall(r'\d+', str(col).replace(',', ''))
             if nums and int(nums[0]) >= closest_t: 
                 large_pct += row[col]
         
-        # 3. 活大戶影響力 C-Value 判定
         if dead_chip_pct > 0 and dead_chip_pct < 1:
             active_pool = 1.0 - dead_chip_pct
             c_val = ((large_pct / 100.0) - dead_chip_pct) / active_pool
@@ -284,9 +281,10 @@ def process_tdcc_dynamic(df_share, df_price, df_sh, dead_chip_str):
     return pd.DataFrame(out)
 
 # ==========================================
-# 其餘處理函式
+# 其餘處理函式 (全面掛載空表防呆)
 # ==========================================
 def process_price(df):
+    if df.empty: return pd.DataFrame()
     df_out = df.copy()
     df_out['Trading_Volume'] = (pd.to_numeric(df_out['Trading_Volume'], errors='coerce').fillna(0) / 1000).round().astype(int)
     df_out = df_out.rename(columns={"date":"日期","Trading_Volume":"成交量(張)","Trading_money":"成交金額(千元)","open":"開盤價(元)","max":"最高價(元)","min":"最低價(元)","close":"收盤價(元)","spread":"漲跌(元)"})
@@ -294,6 +292,7 @@ def process_price(df):
     return df_out[['日期','成交量(張)','開盤價(元)','最高價(元)','最低價(元)','收盤價(元)','漲跌(元)','斷頭價(0.78)']].tail(15).sort_values('日期', ascending=False)
 
 def process_margin(df):
+    if df.empty: return pd.DataFrame()
     cols = ["MarginPurchaseBuy", "MarginPurchaseSell", "MarginPurchaseCashRepayment", "MarginPurchaseTodayBalance", "ShortSaleBuy", "ShortSaleSell", "ShortSaleCashRepayment", "ShortSaleTodayBalance", "OffsetLoanAndShort", "MarginPurchaseYesterdayBalance", "ShortSaleYesterdayBalance"]
     for c in cols:
         if c in df.columns: df[c] = (pd.to_numeric(df[c], errors='coerce').fillna(0) / 1000).round().astype(int)
@@ -303,6 +302,7 @@ def process_margin(df):
     return df[['日期','融資買進(張)','融資賣出(張)','融資現償(張)','融資餘額(張)','融資增減(張)','融券買進(張)','融券賣出(張)','融券餘額(張)','融券增減(張)','資券相抵(張)']].tail(15).sort_values('日期', ascending=False)
 
 def process_inst(df):
+    if df.empty: return pd.DataFrame()
     pdf = df.pivot_table(index='date', columns='name', values=['buy', 'sell'], fill_value=0).reset_index()
     pdf.columns = ['_'.join(c).strip('_') for c in pdf.columns.values]
     out = pd.DataFrame({'日期': pdf['date']})
@@ -316,12 +316,16 @@ def process_inst(df):
     return out.tail(15).sort_values('日期', ascending=False)
 
 def process_fut_inst(df):
+    if df.empty: return pd.DataFrame()
     df['net'] = pd.to_numeric(df['long_open_interest_balance_volume'],0) - pd.to_numeric(df['short_open_interest_balance_volume'],0)
     pdf = df.pivot_table(index='date', columns='institutional_investors', values='net', fill_value=0).reset_index()
     for col in ['Foreign_Investor', 'Investment_Trust', 'Dealer']:
         if col not in pdf.columns: pdf[col] = 0
     return pdf.rename(columns={'date': '日期', 'Foreign_Investor': '外資多空(口)', 'Investment_Trust': '投信多空(口)', 'Dealer': '自營多空(口)'}).tail(15).sort_values('日期', ascending=False)
 
+# ==========================================
+# 執行主引擎
+# ==========================================
 if run_btn:
     with st.spinner(f"正在擷取 {stock_id} 數據，並計算活大戶 C-Value..."):
         start_probe = (datetime.date.today() - datetime.timedelta(days=1095)).strftime("%Y-%m-%d")
@@ -335,7 +339,6 @@ if run_btn:
         df_share_expanded = process_tdcc(df_share_raw)
         df_price = process_price(df_price_raw)
         
-        # 帶入死籌碼輸入值
         df_share_dynamic = process_tdcc_dynamic(df_share_expanded, df_price, df_sh, dead_chip_input)
         
         df_twse = scrape_twse_block(df_price_raw['date'].max())
@@ -353,10 +356,10 @@ if run_btn:
         df_pledge_summary, df_pledge_detail = scrape_fubon_pledge(df_price_raw)
         df_fut = process_fut_inst(fetch_fm("TaiwanFuturesInstitutionalInvestors", d_60, specific_id=False, target_id="TX"))
 
-        st.success("✅ C-Value 引擎運算完畢！活大戶影響力已更新。")
+        st.success("✅ C-Value 引擎運算完畢！空表防呆機制已全面啟動。")
         def show(title, df):
             st.markdown(f"#### {title}")
-            if df is None or df.empty: st.warning("此區塊查無數據")
+            if df is None or df.empty: st.warning("此區塊查無數據 (可能為興櫃股或無發行)")
             else: st.markdown(df.to_html(index=False, border=1), unsafe_allow_html=True)
             
         show("▼▼▼ 1. 活大戶鎖碼 C-Value 判定表 ▼▼▼", df_share_dynamic)
