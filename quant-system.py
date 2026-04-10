@@ -14,7 +14,7 @@ st.set_page_config(page_title="台股全息量化系統 (活大戶鎖碼版)", l
 FINMIND_TOKEN = "eyJ0eXAiOiJKV1QiLCJhbGciOiJIUzI1NiJ9.eyJkYXRlIjoiMjAyNi0wNC0xMCAyMDoyMDo0NiIsInVzZXJfaWQiOiJUb25lMSIsImVtYWlsIjoidG9uZWhzaWVAZ21haWwuY29tIiwiaXAiOiI2MS42Mi43LjE5OCJ9.7s3-IrkfdiUyTvGiZQGESBUBAPHQTnd4pwYcn8_J-CY"
 
 st.title("🤖 交易員實戰手冊：全息量化擷取系統")
-st.markdown("✅ **活大戶影響力 C-Value 引擎** | ✅ **全面空表防呆機制** | ✅ **多線程極速並發**")
+st.markdown("✅ **活大戶 C-Value 精準校正** | ✅ **全面空表防呆機制** | ✅ **多線程極速並發**")
 
 # UI 輸入區
 col1, col2, col3, col4 = st.columns([1, 1, 1, 2])
@@ -23,7 +23,7 @@ with col1:
 with col2:
     bs_diff = st.text_input("買賣家數差 (選填)", placeholder="-150")
 with col3:
-    dead_chip_input = st.text_input("死籌碼 % (選填)", placeholder="例如: 57")
+    dead_chip_input = st.text_input("死籌碼 % (選填)", placeholder="例如: 56")
 with col4:
     st.write(""); st.write("")
     run_btn = st.button("🚀 啟動引擎：擷取全息資料並產生 Prompt", use_container_width=True)
@@ -201,13 +201,33 @@ def process_branch_data(df_raw, period_days, actual_dates):
     return out
 
 # ==========================================
-# 核心大戶加總邏輯優化 (V29 活大戶鎖碼版)
+# 核心大戶加總邏輯優化 (V32 萬能字典防騙版)
 # ==========================================
 def process_tdcc(df):
     if df.empty: return pd.DataFrame()
     df = df[~df['HoldingSharesLevel'].astype(str).str.contains('差異數')]
-    l_map = {"1":"1-999股", "2":"1-5張", "3":"5-10張", "4":"10-15張", "5":"15-20張", "6":"20-30張", "7":"30-40張", "8":"40-50張", "9":"50-100張", "10":"100-200張", "11":"200-400張", "12":"400-600張", "13":"600-800張", "14":"800-1000張", "15":"1000張以上"}
+    
+    # 📌 終極防禦：把各種亂七八糟的股數表示法，強制統一轉成標準的「張數」
+    l_map = {
+        "1":"1-999股", "1.0":"1-999股", "1-999":"1-999股", 
+        "2":"1-5張", "2.0":"1-5張", "1,000-5,000":"1-5張", "1000-5000":"1-5張",
+        "3":"5-10張", "3.0":"5-10張", "5,001-10,000":"5-10張", "5001-10000":"5-10張",
+        "4":"10-15張", "4.0":"10-15張", "10,001-15,000":"10-15張", "10001-15000":"10-15張",
+        "5":"15-20張", "5.0":"15-20張", "15,001-20,000":"15-20張", "15001-20000":"15-20張",
+        "6":"20-30張", "6.0":"20-30張", "20,001-30,000":"20-30張", "20001-30000":"20-30張",
+        "7":"30-40張", "7.0":"30-40張", "30,001-40,000":"30-40張", "30001-40000":"30-40張",
+        "8":"40-50張", "8.0":"40-50張", "40,001-50,000":"40-50張", "40001-50000":"40-50張",
+        "9":"50-100張", "9.0":"50-100張", "50,001-100,000":"50-100張", "50001-100000":"50-100張",
+        "10":"100-200張", "10.0":"100-200張", "100,001-200,000":"100-200張", "100001-200000":"100-200張",
+        "11":"200-400張", "11.0":"200-400張", "200,001-400,000":"200-400張", "200001-400000":"200-400張",
+        "12":"400-600張", "12.0":"400-600張", "400,001-600,000":"400-600張", "400001-600000":"400-600張",
+        "13":"600-800張", "13.0":"600-800張", "600,001-800,000":"600-800張", "600001-800000":"600-800張",
+        "14":"800-1000張", "14.0":"800-1000張", "800,001-1,000,000":"800-1000張", "800001-1000000":"800-1000張",
+        "15":"1000張以上", "15.0":"1000張以上", "1,000,001以上":"1000張以上", "1000001以上":"1000張以上",
+        "17":"合計", "17.0":"合計", "總計":"合計"
+    }
     df['LevelClean'] = df['HoldingSharesLevel'].astype(str).str.strip().map(l_map).fillna(df['HoldingSharesLevel'])
+    
     df['people'] = pd.to_numeric(df['people'], errors='coerce').fillna(0).astype(int)
     df['percent'] = pd.to_numeric(df['percent'], errors='coerce').fillna(0)
     df['unit'] = (pd.to_numeric(df.get('unit', 0), errors='coerce').fillna(0) / 1000).round().astype(int)
@@ -226,7 +246,7 @@ def process_tdcc(df):
     return df_out
 
 def process_tdcc_dynamic(df_share, df_price, df_sh, dead_chip_str):
-    """活大戶 C-Value 實戰引擎"""
+    """活大戶 C-Value 實戰引擎 (防呆隔離版)"""
     if df_share.empty or df_price.empty: return pd.DataFrame()
     
     try: dead_chip_pct = float(dead_chip_str) / 100.0 if dead_chip_str else 0.0
@@ -244,13 +264,15 @@ def process_tdcc_dynamic(df_share, df_price, df_sh, dead_chip_str):
         
         cap_b = official_shares / 10000000 if official_shares > 0 else total_units / 10000
         
-        # 實戰三步判定：定門檻
+        # 實戰三步判定：定門檻 (100 / 400 / 1000)
         if p > 500 or cap_b < 10: closest_t = 100
         elif p >= 100 or cap_b <= 50: closest_t = 400
         else: closest_t = 1000
         
+        # 📌 物理隔離防呆：動態加總，遇到「股」字直接略過，絕不把散戶當大戶
         large_pct = 0
         for col in [c for c in row.index if '比例(%)' in str(c)]:
+            if '股' in str(col): continue  # 攔截 1-999股 等干擾項
             nums = re.findall(r'\d+', str(col).replace(',', ''))
             if nums and int(nums[0]) >= closest_t: 
                 large_pct += row[col]
@@ -258,7 +280,7 @@ def process_tdcc_dynamic(df_share, df_price, df_sh, dead_chip_str):
         if dead_chip_pct > 0 and dead_chip_pct < 1:
             active_pool = 1.0 - dead_chip_pct
             c_val = ((large_pct / 100.0) - dead_chip_pct) / active_pool
-            c_val = max(0, c_val) # 防極端值
+            c_val = max(0, c_val) # 防極端值，避免負數
             
             if c_val >= 0.5: status = "🔴 絕對控盤"
             elif c_val >= 0.3: status = "🟡 高度影響"
@@ -273,7 +295,7 @@ def process_tdcc_dynamic(df_share, df_price, df_sh, dead_chip_str):
             "收盤價": p, 
             "股本(億)": round(cap_b, 2),
             "大戶門檻(張)": closest_t, 
-            "級距總佔比(%)": int(round(large_pct)),
+            "級距總佔比(%)": round(large_pct, 2),
             "死籌碼(%)": int(dead_chip_pct * 100) if dead_chip_str else "-",
             "活大戶影響力C(%)": round(c_val * 100, 1) if dead_chip_str else "-",
             "實戰判定": status
@@ -307,7 +329,6 @@ def process_inst(df):
     pdf.columns = ['_'.join(c).strip('_') for c in pdf.columns.values]
     out = pd.DataFrame({'日期': pdf['date']})
     
-    # 嚴謹轉換：強制轉數字，失敗補 0
     f_buy = pd.to_numeric(pdf.get('buy_Foreign_Investor',0), errors='coerce').fillna(0) + pd.to_numeric(pdf.get('buy_Foreign_Dealer_Self',0), errors='coerce').fillna(0)
     f_sell = pd.to_numeric(pdf.get('sell_Foreign_Investor',0), errors='coerce').fillna(0) + pd.to_numeric(pdf.get('sell_Foreign_Dealer_Self',0), errors='coerce').fillna(0)
     out['外資買賣超(張)'] = ((f_buy - f_sell) / 1000).round().astype(int)
@@ -325,7 +346,6 @@ def process_inst(df):
 
 def process_fut_inst(df):
     if df.empty: return pd.DataFrame()
-    # 嚴謹轉換：強制轉數字，失敗補 0
     df['net'] = pd.to_numeric(df['long_open_interest_balance_volume'], errors='coerce').fillna(0) - pd.to_numeric(df['short_open_interest_balance_volume'], errors='coerce').fillna(0)
     pdf = df.pivot_table(index='date', columns='institutional_investors', values='net', fill_value=0).reset_index()
     for col in ['Foreign_Investor', 'Investment_Trust', 'Dealer']:
@@ -365,7 +385,7 @@ if run_btn:
         df_pledge_summary, df_pledge_detail = scrape_fubon_pledge(df_price_raw)
         df_fut = process_fut_inst(fetch_fm("TaiwanFuturesInstitutionalInvestors", d_60, specific_id=False, target_id="TX"))
 
-        st.success("✅ C-Value 引擎運算完畢！空表防呆機制已全面啟動。")
+        st.success("✅ C-Value 引擎精準除錯完畢！")
         def show(title, df):
             st.markdown(f"#### {title}")
             if df is None or df.empty: st.warning("此區塊查無數據 (可能為興櫃股或無發行)")
