@@ -10,8 +10,8 @@ import concurrent.futures
 # 設定網頁標題與佈局
 st.set_page_config(page_title="台股全息量化系統 (動態大戶精算版)", layout="wide")
 
-# 內建 Sponsor Token
-FINMIND_TOKEN = "eyJ0eXAiOiJKV1QiLCJhbGciOiJIUzI1NiJ9.eyJkYXRlIjoiMjAyNi0wNC0wOSAxOToxMTo0MiIsInVzZXJfaWQiOiJUb25lMSIsImVtYWlsIjoidG9uZWhzaWVAZ21haWwuY29tIiwiaXAiOiI2MS42Mi43LjE5OCJ9.32OOXXWwga3QGGh5SQe7JHw03wfFfQo4XDohfgSI0d8"
+# 內建最新 Sponsor Token
+FINMIND_TOKEN = "eyJ0eXAiOiJKV1QiLCJhbGciOiJIUzI1NiJ9.eyJkYXRlIjoiMjAyNi0wNC0xMCAyMDoyMDo0NiIsInVzZXJfaWQiOiJUb25lMSIsImVtYWlsIjoidG9uZWhzaWVAZ21haWwuY29tIiwiaXAiOiI2MS42Mi43LjE5OCJ9.7s3-IrkfdiUyTvGiZQGESBUBAPHQTnd4pwYcn8_J-CY"
 
 st.title("🤖 交易員實戰手冊：全息量化擷取系統")
 st.markdown("✅ **動態精算大戶門檻與股本** | ✅ **100% 繁體中文化** | ✅ **多線程極速並發**")
@@ -290,7 +290,18 @@ def process_tdcc(df):
 def process_tdcc_dynamic(df_share_expanded, df_price, is_blue_chip):
     """【精準回歸】基於總張數換算股本的動態大戶精算表"""
     if df_share_expanded.empty or df_price.empty: return pd.DataFrame()
-    df_merged = pd.merge(df_share_expanded, df_price[['日期', '收盤價(元)']], on='日期', how='left')
+    
+    df_share_expanded['日期_dt'] = pd.to_datetime(df_share_expanded['日期'])
+    df_price['日期_dt'] = pd.to_datetime(df_price['日期'])
+    df_price_sorted = df_price.sort_values('日期_dt')
+    
+    df_merged = pd.merge_asof(
+        df_share_expanded.sort_values('日期_dt'), 
+        df_price_sorted[['日期_dt', '收盤價(元)']], 
+        on='日期_dt', 
+        direction='backward'
+    ).sort_values('日期_dt', ascending=False)
+    
     out_rows = []
     for _, row in df_merged.iterrows():
         d = row['日期']
@@ -300,7 +311,6 @@ def process_tdcc_dynamic(df_share_expanded, df_price, is_blue_chip):
         if pd.isna(p) or p == 0 or total_units == 0:
             continue
             
-        # 股本換算：(總張數 * 1000股 * 面額10元) / 1億 = 總張數 / 10000
         capital_billion = total_units / 10000
         
         weight = 1.5 if is_blue_chip else 1.0
@@ -324,8 +334,8 @@ def process_tdcc_dynamic(df_share_expanded, df_price, is_blue_chip):
             
         out_rows.append({
             "日期": d,
-            "收盤價(元)": p,
-            "精算股本(億)": round(capital_billion, 2),
+            "參考收盤價(元)": p,
+            "估算股本(億)": round(capital_billion, 2),
             "精算大戶門檻(張)": closest_t,
             "大戶持股(%)": int(large_pct),
             "散戶持股(<50張)(%)": int(retail_pct),
@@ -429,7 +439,7 @@ def format_pledge_to_gas(df_summary, df_detail):
 # 執行主引擎
 # ==========================================
 if run_btn:
-    with st.spinner(f"正在擷取 {stock_id} 全息量化數據與大盤期權籌碼..."):
+    with st.spinner(f"正在擷取 {stock_id} 全息量化數據與精算大戶門檻..."):
         start_probe_3y = (datetime.date.today() - datetime.timedelta(days=1095)).strftime("%Y-%m-%d")
         df_price_raw = fetch_fm("TaiwanStockPrice", start_probe_3y)
         
@@ -440,7 +450,7 @@ if run_btn:
             d_latest = actual_dates[0]
             d_60 = actual_dates[59] if len(actual_dates) >= 60 else actual_dates[-1]
 
-            # 集保處理 (產生詳細版與動態大戶版)
+            # 集保處理 (產生詳細版與動態大戶版，日期對齊校正)
             df_share_expanded = process_tdcc(fetch_fm("TaiwanStockHoldingSharesPer", d_60))
             df_price = process_price(df_price_raw)
             df_share_dynamic = process_tdcc_dynamic(df_share_expanded, df_price, is_blue_chip)
@@ -503,7 +513,7 @@ if run_btn:
             df_fut_inst = process_fut_inst(fetch_fm("TaiwanFuturesInstitutionalInvestors", d_60, specific_id=False, target_id="TX"))
             df_opt_inst = process_opt_inst(fetch_fm("TaiwanOptionInstitutionalInvestors", d_60, specific_id=False, target_id="TXO"))
 
-            st.success(f"✅ 全資料擷取完畢！動態大戶門檻與股本已掛載。")
+            st.success(f"✅ 讀取完畢！Token已更新，動態大戶門檻與股本已掛載。")
             def render_html_table(title, df):
                 st.markdown(f"#### {title}")
                 if df is None or df.empty: st.warning("此區塊目前查無數據")
