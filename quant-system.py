@@ -14,7 +14,7 @@ st.set_page_config(page_title="台股全息量化系統 (動態大戶精算版)"
 FINMIND_TOKEN = "eyJ0eXAiOiJKV1QiLCJhbGciOiJIUzI1NiJ9.eyJkYXRlIjoiMjAyNi0wNC0xMCAyMDoyMDo0NiIsInVzZXJfaWQiOiJUb25lMSIsImVtYWlsIjoidG9uZWhzaWVAZ21haWwuY29tIiwiaXAiOiI2MS42Mi43LjE5OCJ9.7s3-IrkfdiUyTvGiZQGESBUBAPHQTnd4pwYcn8_J-CY"
 
 st.title("🤖 交易員實戰手冊：全息量化擷取系統")
-st.markdown("✅ **動態精算大戶門檻與股本** | ✅ **100% 繁體中文化** | ✅ **多線程極速並發**")
+st.markdown("✅ **動態精算容錯機制 (無股本也能算)** | ✅ **100% 繁體中文化** | ✅ **多線程極速並發**")
 
 # UI 輸入區
 col1, col2, col3 = st.columns([1, 1, 2])
@@ -22,7 +22,6 @@ with col1:
     stock_id = st.text_input("輸入個股代號", value="8027")
 with col2:
     bs_diff = st.text_input("買賣家數差數值 (手動)", placeholder="-150")
-    # 重新加入權值股開關
     is_blue_chip = st.checkbox("🎯 該標的為大型權值股 (大戶門檻 1.5 倍權重)")
 with col3:
     st.write(""); st.write("")
@@ -288,15 +287,17 @@ def process_tdcc(df):
     return df_out[final_cols]
 
 def process_tdcc_dynamic(df_share_expanded, df_price, is_blue_chip):
-    """【精準回歸】基於總張數換算股本的動態大戶精算表"""
+    """【容錯防呆版】基於總張數換算股本的動態大戶精算表"""
     if df_share_expanded.empty or df_price.empty: return pd.DataFrame()
     
+    # 日期對齊防呆
     df_share_expanded['日期_dt'] = pd.to_datetime(df_share_expanded['日期'])
     df_price['日期_dt'] = pd.to_datetime(df_price['日期'])
+    df_share_sorted = df_share_expanded.sort_values('日期_dt')
     df_price_sorted = df_price.sort_values('日期_dt')
     
     df_merged = pd.merge_asof(
-        df_share_expanded.sort_values('日期_dt'), 
+        df_share_sorted, 
         df_price_sorted[['日期_dt', '收盤價(元)']], 
         on='日期_dt', 
         direction='backward'
@@ -307,40 +308,51 @@ def process_tdcc_dynamic(df_share_expanded, df_price, is_blue_chip):
         d = row['日期']
         p = row['收盤價(元)']
         total_units = row.get('總張數', 0)
+        if pd.isna(total_units): total_units = 0
         
-        if pd.isna(p) or p == 0 or total_units == 0:
+        # 如果當天完全沒有價格資料，無法估算門檻，才跳過
+        if pd.isna(p) or p == 0:
             continue
             
-        capital_billion = total_units / 10000
+        # 股本換算，若無資料則為 0
+        capital_billion = (total_units / 10000) if total_units > 0 else 0
         
+        # 取最大值邏輯：即使 total_units 為 0，依然能用 money_threshold 算出門檻
         weight = 1.5 if is_blue_chip else 1.0
         money_threshold = 50000 / p if p > 0 else 0
-        influence_threshold = total_units * 0.0005
+        influence_threshold = total_units * 0.0005 if total_units > 0 else 0
         raw_t = max(money_threshold, influence_threshold) * weight
         
         thresholds = [100, 200, 400, 600, 800, 1000]
         closest_t = min(thresholds, key=lambda x: abs(x - raw_t))
         
         retail_lvls = ['1-999股', '1-5張', '5-10張', '10-15張', '15-20張', '20-30張', '30-40張', '40-50張']
-        retail_pct = sum([row.get(f"{lvl}_比例(%)", 0) for lvl in retail_lvls])
+        retail_pct = sum([pd.to_numeric(row.get(f"{lvl}_比例(%)", 0), errors='coerce') for lvl in retail_lvls])
         
         large_pct = 0
-        if closest_t <= 100: large_pct = sum([row.get(f"{lvl}_比例(%)", 0) for lvl in ['100-200張', '200-400張', '400-600張', '600-800張', '800-1000張', '1000張以上']])
-        elif closest_t <= 200: large_pct = sum([row.get(f"{lvl}_比例(%)", 0) for lvl in ['200-400張', '400-600張', '600-800張', '800-1000張', '1000張以上']])
-        elif closest_t <= 400: large_pct = sum([row.get(f"{lvl}_比例(%)", 0) for lvl in ['400-600張', '600-800張', '800-1000張', '1000張以上']])
-        elif closest_t <= 600: large_pct = sum([row.get(f"{lvl}_比例(%)", 0) for lvl in ['600-800張', '800-1000張', '1000張以上']])
-        elif closest_t <= 800: large_pct = sum([row.get(f"{lvl}_比例(%)", 0) for lvl in ['800-1000張', '1000張以上']])
-        else: large_pct = row.get('1000張以上_比例(%)', 0)
+        if closest_t <= 100: large_pct = sum([pd.to_numeric(row.get(f"{lvl}_比例(%)", 0), errors='coerce') for lvl in ['100-200張', '200-400張', '400-600張', '600-800張', '800-1000張', '1000張以上']])
+        elif closest_t <= 200: large_pct = sum([pd.to_numeric(row.get(f"{lvl}_比例(%)", 0), errors='coerce') for lvl in ['200-400張', '400-600張', '600-800張', '800-1000張', '1000張以上']])
+        elif closest_t <= 400: large_pct = sum([pd.to_numeric(row.get(f"{lvl}_比例(%)", 0), errors='coerce') for lvl in ['400-600張', '600-800張', '800-1000張', '1000張以上']])
+        elif closest_t <= 600: large_pct = sum([pd.to_numeric(row.get(f"{lvl}_比例(%)", 0), errors='coerce') for lvl in ['600-800張', '800-1000張', '1000張以上']])
+        elif closest_t <= 800: large_pct = sum([pd.to_numeric(row.get(f"{lvl}_比例(%)", 0), errors='coerce') for lvl in ['800-1000張', '1000張以上']])
+        else: large_pct = pd.to_numeric(row.get('1000張以上_比例(%)', 0), errors='coerce')
+        
+        # 處理可能的 NaN
+        retail_pct = 0 if pd.isna(retail_pct) else retail_pct
+        large_pct = 0 if pd.isna(large_pct) else large_pct
             
         out_rows.append({
             "日期": d,
             "參考收盤價(元)": p,
-            "估算股本(億)": round(capital_billion, 2),
+            "估算股本(億)": round(capital_billion, 2) if capital_billion > 0 else "查無資料",
             "精算大戶門檻(張)": closest_t,
             "大戶持股(%)": int(large_pct),
             "散戶持股(<50張)(%)": int(retail_pct),
-            "總人數(人)": row.get('總人數(人)', 0)
+            "總人數(人)": int(row.get('總人數(人)', 0))
         })
+    
+    df_share_expanded.drop(columns=['日期_dt'], inplace=True, errors='ignore')
+    df_price.drop(columns=['日期_dt'], inplace=True, errors='ignore')
     return pd.DataFrame(out_rows)
 
 def process_margin(df):
@@ -450,7 +462,7 @@ if run_btn:
             d_latest = actual_dates[0]
             d_60 = actual_dates[59] if len(actual_dates) >= 60 else actual_dates[-1]
 
-            # 集保處理 (產生詳細版與動態大戶版，日期對齊校正)
+            # 集保處理 (包含容錯防呆設計)
             df_share_expanded = process_tdcc(fetch_fm("TaiwanStockHoldingSharesPer", d_60))
             df_price = process_price(df_price_raw)
             df_share_dynamic = process_tdcc_dynamic(df_share_expanded, df_price, is_blue_chip)
@@ -513,7 +525,7 @@ if run_btn:
             df_fut_inst = process_fut_inst(fetch_fm("TaiwanFuturesInstitutionalInvestors", d_60, specific_id=False, target_id="TX"))
             df_opt_inst = process_opt_inst(fetch_fm("TaiwanOptionInstitutionalInvestors", d_60, specific_id=False, target_id="TXO"))
 
-            st.success(f"✅ 讀取完畢！Token已更新，動態大戶門檻與股本已掛載。")
+            st.success(f"✅ 全資料擷取完畢！防呆容錯機制已啟動。")
             def render_html_table(title, df):
                 st.markdown(f"#### {title}")
                 if df is None or df.empty: st.warning("此區塊目前查無數據")
