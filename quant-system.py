@@ -8,25 +8,29 @@ import re
 import concurrent.futures
 
 # 設定網頁標題與佈局
-st.set_page_config(page_title="台股全息量化系統 (活大戶鎖碼版)", layout="wide")
+st.set_page_config(page_title="台股全息量化系統 (雙軸大戶鎖碼版)", layout="wide")
 
 # 內建最新 Sponsor Token
 FINMIND_TOKEN = "eyJ0eXAiOiJKV1QiLCJhbGciOiJIUzI1NiJ9.eyJkYXRlIjoiMjAyNi0wNC0xMCAyMDoyMDo0NiIsInVzZXJfaWQiOiJUb25lMSIsImVtYWlsIjoidG9uZWhzaWVAZ21haWwuY29tIiwiaXAiOiI2MS42Mi43LjE5OCJ9.7s3-IrkfdiUyTvGiZQGESBUBAPHQTnd4pwYcn8_J-CY"
 
 st.title("🤖 交易員實戰手冊：全息量化擷取系統")
-st.markdown("✅ **活大戶 C-Value 精準校正** | ✅ **全面空表防呆機制** | ✅ **多線程極速並發**")
+st.markdown("✅ **雙軸動態大戶門檻 (財力 vs 影響力)** | ✅ **活大戶 C-Value 引擎** | ✅ **全面防呆與多線程**")
 
-# UI 輸入區
-col1, col2, col3, col4 = st.columns([1, 1, 1, 2])
+# UI 輸入區 (加入自訂雙軸參數)
+col1, col2, col3, col4, col5 = st.columns([1, 1, 1, 1, 1])
 with col1:
-    stock_id = st.text_input("輸入個股代號", value="7711")
+    stock_id = st.text_input("個股代號", value="7711")
 with col2:
-    bs_diff = st.text_input("買賣家數差 (選填)", placeholder="-150")
+    bs_diff = text_input_style = st.text_input("買賣家數差", placeholder="選填 (如 -150)")
 with col3:
-    dead_chip_input = st.text_input("死籌碼 % (選填)", placeholder="例如: 56")
+    dead_chip_input = st.text_input("死籌碼 %", placeholder="選填 (如 57)")
 with col4:
-    st.write(""); st.write("")
-    run_btn = st.button("🚀 啟動引擎：擷取全息資料並產生 Prompt", use_container_width=True)
+    money_input = st.text_input("財力設定(萬)", value="5000")
+with col5:
+    influence_input = st.text_input("影響力設定(%)", value="0.5")
+
+st.write("")
+run_btn = st.button("🚀 啟動引擎：擷取全息資料並產生 Prompt", use_container_width=True)
 
 st.divider()
 
@@ -201,33 +205,13 @@ def process_branch_data(df_raw, period_days, actual_dates):
     return out
 
 # ==========================================
-# 核心大戶加總邏輯優化 (V32 萬能字典防騙版)
+# 核心大戶加總邏輯優化 (V33 雙軸大戶鎖碼版)
 # ==========================================
 def process_tdcc(df):
     if df.empty: return pd.DataFrame()
     df = df[~df['HoldingSharesLevel'].astype(str).str.contains('差異數')]
-    
-    # 📌 終極防禦：把各種亂七八糟的股數表示法，強制統一轉成標準的「張數」
-    l_map = {
-        "1":"1-999股", "1.0":"1-999股", "1-999":"1-999股", 
-        "2":"1-5張", "2.0":"1-5張", "1,000-5,000":"1-5張", "1000-5000":"1-5張",
-        "3":"5-10張", "3.0":"5-10張", "5,001-10,000":"5-10張", "5001-10000":"5-10張",
-        "4":"10-15張", "4.0":"10-15張", "10,001-15,000":"10-15張", "10001-15000":"10-15張",
-        "5":"15-20張", "5.0":"15-20張", "15,001-20,000":"15-20張", "15001-20000":"15-20張",
-        "6":"20-30張", "6.0":"20-30張", "20,001-30,000":"20-30張", "20001-30000":"20-30張",
-        "7":"30-40張", "7.0":"30-40張", "30,001-40,000":"30-40張", "30001-40000":"30-40張",
-        "8":"40-50張", "8.0":"40-50張", "40,001-50,000":"40-50張", "40001-50000":"40-50張",
-        "9":"50-100張", "9.0":"50-100張", "50,001-100,000":"50-100張", "50001-100000":"50-100張",
-        "10":"100-200張", "10.0":"100-200張", "100,001-200,000":"100-200張", "100001-200000":"100-200張",
-        "11":"200-400張", "11.0":"200-400張", "200,001-400,000":"200-400張", "200001-400000":"200-400張",
-        "12":"400-600張", "12.0":"400-600張", "400,001-600,000":"400-600張", "400001-600000":"400-600張",
-        "13":"600-800張", "13.0":"600-800張", "600,001-800,000":"600-800張", "600001-800000":"600-800張",
-        "14":"800-1000張", "14.0":"800-1000張", "800,001-1,000,000":"800-1000張", "800001-1000000":"800-1000張",
-        "15":"1000張以上", "15.0":"1000張以上", "1,000,001以上":"1000張以上", "1000001以上":"1000張以上",
-        "17":"合計", "17.0":"合計", "總計":"合計"
-    }
+    l_map = {"1":"1-999股", "2":"1-5張", "3":"5-10張", "4":"10-15張", "5":"15-20張", "6":"20-30張", "7":"30-40張", "8":"40-50張", "9":"50-100張", "10":"100-200張", "11":"200-400張", "12":"400-600張", "13":"600-800張", "14":"800-1000張", "15":"1000張以上"}
     df['LevelClean'] = df['HoldingSharesLevel'].astype(str).str.strip().map(l_map).fillna(df['HoldingSharesLevel'])
-    
     df['people'] = pd.to_numeric(df['people'], errors='coerce').fillna(0).astype(int)
     df['percent'] = pd.to_numeric(df['percent'], errors='coerce').fillna(0)
     df['unit'] = (pd.to_numeric(df.get('unit', 0), errors='coerce').fillna(0) / 1000).round().astype(int)
@@ -245,12 +229,17 @@ def process_tdcc(df):
     df_out = pd.merge(df_total, df_pivot, on='date', how='left').rename(columns={'date': '日期'}).sort_values('日期', ascending=False)
     return df_out
 
-def process_tdcc_dynamic(df_share, df_price, df_sh, dead_chip_str):
-    """活大戶 C-Value 實戰引擎 (防呆隔離版)"""
+def process_tdcc_dynamic(df_share, df_price, df_sh, dead_chip_str, base_money_str, influence_pct_str):
+    """【V33】雙軸大戶 C-Value 實戰引擎"""
     if df_share.empty or df_price.empty: return pd.DataFrame()
     
+    # 處理輸入參數
     try: dead_chip_pct = float(dead_chip_str) / 100.0 if dead_chip_str else 0.0
     except: dead_chip_pct = 0.0
+    try: base_money_wan = float(base_money_str) if base_money_str else 5000.0
+    except: base_money_wan = 5000.0
+    try: influence_rate = float(influence_pct_str) / 100.0 if influence_pct_str else 0.005
+    except: influence_rate = 0.005
     
     official_shares = pd.to_numeric(df_sh.iloc[0].get('NumberOfSharesIssued', 0), errors='coerce') if not df_sh.empty else 0
     df_share['dt'] = pd.to_datetime(df_share['日期']); df_price['dt'] = pd.to_datetime(df_price['日期'])
@@ -262,14 +251,19 @@ def process_tdcc_dynamic(df_share, df_price, df_sh, dead_chip_str):
         if pd.isna(p) or p == 0: continue
         total_units = row.get('總張數', 0)
         
+        # 股本換算
         cap_b = official_shares / 10000000 if official_shares > 0 else total_units / 10000
         
-        # 實戰三步判定：定門檻 (100 / 400 / 1000)
-        if p > 500 or cap_b < 10: closest_t = 100
-        elif p >= 100 or cap_b <= 50: closest_t = 400
-        else: closest_t = 1000
+        # 📌 雙軸門檻計算：MAX(財力門檻, 影響力門檻)
+        money_threshold = (base_money_wan * 10000) / (p * 1000) # (萬 * 10000) / (股價 * 1000股)
+        influence_threshold = total_units * influence_rate
+        raw_t = max(money_threshold, influence_threshold)
         
-        # 📌 物理隔離防呆：動態加總，遇到「股」字直接略過，絕不把散戶當大戶
+        # 對齊集保官方級距
+        valid_thresholds = [100, 200, 400, 600, 800, 1000]
+        closest_t = min(valid_thresholds, key=lambda x: abs(x - raw_t))
+        
+        # 動態加總大戶佔比
         large_pct = 0
         for col in [c for c in row.index if '比例(%)' in str(c)]:
             if '股' in str(col): continue  # 攔截 1-999股 等干擾項
@@ -277,10 +271,11 @@ def process_tdcc_dynamic(df_share, df_price, df_sh, dead_chip_str):
             if nums and int(nums[0]) >= closest_t: 
                 large_pct += row[col]
         
+        # 活大戶影響力 C-Value 判定
         if dead_chip_pct > 0 and dead_chip_pct < 1:
             active_pool = 1.0 - dead_chip_pct
             c_val = ((large_pct / 100.0) - dead_chip_pct) / active_pool
-            c_val = max(0, c_val) # 防極端值，避免負數
+            c_val = max(0, c_val) # 防極端值
             
             if c_val >= 0.5: status = "🔴 絕對控盤"
             elif c_val >= 0.3: status = "🟡 高度影響"
@@ -294,7 +289,8 @@ def process_tdcc_dynamic(df_share, df_price, df_sh, dead_chip_str):
             "日期": row['日期'], 
             "收盤價": p, 
             "股本(億)": round(cap_b, 2),
-            "大戶門檻(張)": closest_t, 
+            "主導門檻": "影響力" if influence_threshold > money_threshold else "財力",
+            "精算門檻(張)": closest_t, 
             "級距總佔比(%)": round(large_pct, 2),
             "死籌碼(%)": int(dead_chip_pct * 100) if dead_chip_str else "-",
             "活大戶影響力C(%)": round(c_val * 100, 1) if dead_chip_str else "-",
@@ -303,7 +299,7 @@ def process_tdcc_dynamic(df_share, df_price, df_sh, dead_chip_str):
     return pd.DataFrame(out)
 
 # ==========================================
-# 其餘處理函式 (全面掛載空表防呆與嚴謹參數)
+# 其餘處理函式
 # ==========================================
 def process_price(df):
     if df.empty: return pd.DataFrame()
@@ -356,7 +352,7 @@ def process_fut_inst(df):
 # 執行主引擎
 # ==========================================
 if run_btn:
-    with st.spinner(f"正在擷取 {stock_id} 數據，並計算活大戶 C-Value..."):
+    with st.spinner(f"正在擷取 {stock_id} 數據，並執行雙軸大戶精算..."):
         start_probe = (datetime.date.today() - datetime.timedelta(days=1095)).strftime("%Y-%m-%d")
         df_price_raw = fetch_fm("TaiwanStockPrice", start_probe)
         if df_price_raw.empty: st.error("查無股價資料"); st.stop()
@@ -368,7 +364,8 @@ if run_btn:
         df_share_expanded = process_tdcc(df_share_raw)
         df_price = process_price(df_price_raw)
         
-        df_share_dynamic = process_tdcc_dynamic(df_share_expanded, df_price, df_sh, dead_chip_input)
+        # 帶入所有自訂參數
+        df_share_dynamic = process_tdcc_dynamic(df_share_expanded, df_price, df_sh, dead_chip_input, money_input, influence_input)
         
         df_twse = scrape_twse_block(df_price_raw['date'].max())
         df_margin = process_margin(fetch_fm("TaiwanStockMarginPurchaseShortSale", d_60))
@@ -385,13 +382,13 @@ if run_btn:
         df_pledge_summary, df_pledge_detail = scrape_fubon_pledge(df_price_raw)
         df_fut = process_fut_inst(fetch_fm("TaiwanFuturesInstitutionalInvestors", d_60, specific_id=False, target_id="TX"))
 
-        st.success("✅ C-Value 引擎精準除錯完畢！")
+        st.success("✅ 雙軸 C-Value 引擎運算完畢！")
         def show(title, df):
             st.markdown(f"#### {title}")
             if df is None or df.empty: st.warning("此區塊查無數據 (可能為興櫃股或無發行)")
             else: st.markdown(df.to_html(index=False, border=1), unsafe_allow_html=True)
             
-        show("▼▼▼ 1. 活大戶鎖碼 C-Value 判定表 ▼▼▼", df_share_dynamic)
+        show("▼▼▼ 1. 雙軸活大戶鎖碼判定表 (C-Value) ▼▼▼", df_share_dynamic)
         show("▼▼▼ 2. 詳細集保分級展開明細 [來源：FinMind] ▼▼▼", df_share_expanded)
         show("▼▼▼ 3. 鉅額交易明細 [來源：證交所] ▼▼▼", df_twse)
         show("▼▼▼ 4. 散戶資券餘額 [來源：FinMind] ▼▼▼", df_margin)
@@ -404,8 +401,8 @@ if run_btn:
         show("▼▼▼ 10. 台指期貨三大法人未平倉 (大盤) ▼▼▼", df_fut)
 
         st.divider(); st.subheader("📋 【給 Gemini 的量化分析資料包】")
-        p = f"請幫我分析 {stock_id} 的量化籌碼。已使用 C-Value 過濾死籌碼，找出真實活大戶影響力。\n\n"
-        p += format_to_gas(df_share_dynamic, "1. 活大戶鎖碼判定表 (C-Value)")
+        p = f"請幫我分析 {stock_id} 的量化籌碼。大戶門檻已根據「財力與影響力」雙軸精算，並以 C-Value 過濾死籌碼。\n\n"
+        p += format_to_gas(df_share_dynamic, "1. 雙軸活大戶鎖碼判定表 (C-Value)")
         p += format_to_gas(df_share_expanded, "2. 集保詳細分級")
         p += format_to_gas(df_margin, "3. 散戶資券餘額")
         p += format_to_gas(df_inst, "4. 法人買賣超")
