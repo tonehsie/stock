@@ -275,7 +275,9 @@ def process_tdcc_dynamic(df_share, df_price, dead_chip_str, base_money_str, infl
         p = row['收盤價(元)']
         if pd.isna(p) or p == 0: continue
         total_units = row.get('總張數', 0)
-        cap_b = total_units / 10000
+        
+        # 絕對使用實際股數(總張數)回推股本與影響力，不牽涉股價市值
+        cap_b = total_units / 10000 
         
         money_threshold = (base_money_wan * 10000) / (p * 1000)
         influence_threshold = total_units * influence_rate
