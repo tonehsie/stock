@@ -9,7 +9,7 @@ import re
 import concurrent.futures
 
 # 設定網頁標題與佈局
-st.set_page_config(page_title="台股全息量化系統 (V13.1 實戰排版版)", layout="wide")
+st.set_page_config(page_title="台股全息量化系統 (V13.2 穩定版)", layout="wide")
 
 # 內建最新 Sponsor Token
 FINMIND_TOKEN = "eyJ0eXAiOiJKV1QiLCJhbGciOiJIUzI1NiJ9.eyJkYXRlIjoiMjAyNi0wNC0xMCAyMDoyMDo0NiIsInVzZXJfaWQiOiJUb25lMSIsImVtYWlsIjoidG9uZWhzaWVAZ21haWwuY29tIiwiaXAiOiI2MS42Mi43LjE5OCJ9.7s3-IrkfdiUyTvGiZQGESBUBAPHQTnd4pwYcn8_J-CY"
@@ -24,7 +24,7 @@ table.radar-table td:last-child { text-align: left !important; }
 """, unsafe_allow_html=True)
 
 st.title("🤖 交易員實戰手冊：全息量化擷取系統")
-st.markdown("✅ **V13.1 專家雷達 (高敏防雷+收盤價對照)** | ✅ **主力分點群聚顯示** | ✅ **當沖數據回歸**")
+st.markdown("✅ **V13.2 專家雷達 (高敏防雷+收盤價對照)** | ✅ **主力分點群聚顯示** | ✅ **當沖數據回歸**")
 
 # UI 輸入區
 col1, col2, col3, col4 = st.columns([1, 1, 1, 1])
@@ -405,10 +405,11 @@ def process_v13_ultimate_radar(df_wide, dead_chip_val, df_price):
     
     df = df_wide.sort_values('日期', ascending=True).copy()
     
-    # 📌 匯入收盤價
+    # 📌 匯入收盤價，處理時間對齊問題
     df['dt_end'] = pd.to_datetime(df['日期'])
     df_p = df_price.copy()
     df_p['dt'] = pd.to_datetime(df_p['日期'])
+    # 修正舊版中誤傳的變數，確保吃的是 df_p
     df = pd.merge_asof(df.sort_values('dt_end'), df_p.sort_values('dt')[['dt', '收盤價(元)']], left_on='dt_end', right_on='dt', direction='backward')
     
     df['總股東人數'] = df['總人數(人)']
@@ -543,7 +544,7 @@ def process_cbas(df):
     return df_res
 
 def process_fubon_pledge(df_price_raw):
-    # 這裡整合了您之前的富邦質押爬蟲邏輯 (略，與原本相同，為求篇幅精簡，使用原本的 scrape_fubon_pledge)
+    # 為了版面簡潔，此處直接使用之前寫好的 scrape_fubon_pledge 函數
     return scrape_fubon_pledge(df_price_raw)
 
 # ==========================================
@@ -583,8 +584,8 @@ if run_btn:
         # 📌 產生淨化版 C-Value (1-1)
         df_share_dynamic = process_tdcc_dynamic(df_share_wide, df_price, dead_chip_input, auto_dead_chip, money_input, influence_input)
         
-        # 📌 啟動 V13.1 專家診斷雷達 (1-2)
-        df_v13_radar = process_v13_ultimate_radar(df_share_wide, final_dead_chip, df_p_raw)
+        # 📌 啟動 V13.1 專家診斷雷達 (1-2)，餵入正確的 df_price 避免報錯
+        df_v13_radar = process_v13_ultimate_radar(df_share_wide, final_dead_chip, df_price)
         
         df_twse = scrape_twse_block(actual_dates[0])
         df_margin = process_margin(fetch_fm("TaiwanStockMarginPurchaseShortSale", d_60))
@@ -611,7 +612,7 @@ if run_btn:
         df_gov = pd.DataFrame()
         if not df_b_today.empty:
             govs = ["台銀", "土銀", "彰銀", "第一", "兆豐", "華南", "合庫", "台企銀"]
-            df_gov = df_b_today[df_b_today.astype(str).apply(lambda x: x.str.contains('|'.join(govs))).any(axis=1)]
+            df_gov = df_b_today[df_b_today.astype(str).apply(lambda x: x.str.contains('|'.join(govs))) .any(axis=1)]
             df_gov.columns = list(df_gov.columns)
 
         df_pledge_summary, df_pledge_detail = process_fubon_pledge(df_p_raw)
