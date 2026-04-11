@@ -22,9 +22,9 @@ table.dataframe th { text-align: center !important; }
 """, unsafe_allow_html=True)
 
 st.title("🤖 交易員實戰手冊：全息量化擷取系統")
-st.markdown("✅ **數字全靠右對齊** | ✅ **董監死籌碼與家數差自動化** | ✅ **雙軸 C-Value 引擎**")
+st.markdown("✅ **幽靈欄位徹底清除** | ✅ **數字全靠右對齊** | ✅ **雙軸 C-Value 引擎**")
 
-# UI 輸入區 (移除手動家數差，版面更洗鍊)
+# UI 輸入區 (徹底移除手動家數差)
 col1, col2, col3, col4 = st.columns([1, 1, 1, 1])
 with col1:
     stock_id = st.text_input("個股代號", value="7711")
@@ -69,14 +69,12 @@ def format_pledge_to_gas(df_summary, df_detail):
     return format_to_gas(df_summary, "9. 董監大股東質設 (餘額與斷頭預警)") + format_to_gas(df_detail, "董監大股東質設 (異動明細)")
 
 def scrape_director_holding(target_id):
-    """📌 自動爬取 Yahoo 股市的董監持股比例"""
     try:
         headers = {"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36"}
         url = f"https://tw.stock.yahoo.com/quote/{target_id}/profile"
         res = requests.get(url, headers=headers, timeout=5)
         match = re.search(r'董監持股.*?(\d+\.?\d*)\s*[%％]', res.text)
-        if match:
-            return float(match.group(1))
+        if match: return float(match.group(1))
     except: pass
     return 0.0
 
@@ -105,15 +103,20 @@ def fetch_fm_branch_fast_parallel(dates_list):
     return pd.DataFrame(all_data)
 
 def process_branch_diff(df_raw, actual_dates):
-    if df_raw.empty: return {}
-    diff_map = {}
+    if df_raw.empty: return pd.DataFrame()
+    out = []
     for d in actual_dates[:15]:
         df_day = df_raw[df_raw['date'] == d]
         if df_day.empty: continue
         buy_count = df_day[df_day['buy'] > 0]['securities_trader'].nunique()
         sell_count = df_day[df_day['sell'] > 0]['securities_trader'].nunique()
-        diff_map[d] = buy_count - sell_count
-    return diff_map
+        out.append({
+            "日期": d,
+            "買進家數": buy_count,
+            "賣出家數": sell_count,
+            "買賣家數差": buy_count - sell_count
+        })
+    return pd.DataFrame(out)
 
 def process_branch_top15(df_raw, period_days, actual_dates):
     if len(actual_dates) < period_days or df_raw.empty: return pd.DataFrame()
@@ -313,8 +316,8 @@ def process_tdcc(df):
     
     return df_wide, df_unit, df_people, df_percent, df_avg
 
-def process_tdcc_dynamic(df_share, df_price, dead_chip_str, auto_dead_chip, base_money_str, influence_pct_str, branch_diff_map):
-    """📌 C-Value 實戰引擎 (買賣家數差自動對應)"""
+def process_tdcc_dynamic(df_share, df_price, dead_chip_str, auto_dead_chip, base_money_str, influence_pct_str, df_branch_diff):
+    """📌 修正：使用 .copy() 無痕模式防禦 dt 外洩"""
     if df_share.empty or df_price.empty: return pd.DataFrame()
     
     is_auto_chip = False
@@ -330,8 +333,14 @@ def process_tdcc_dynamic(df_share, df_price, dead_chip_str, auto_dead_chip, base
     try: influence_rate = float(str(influence_pct_str).replace('%', '').strip()) / 100.0 if influence_pct_str else 0.005
     except: influence_rate = 0.005
     
-    df_share['dt'] = pd.to_datetime(df_share['日期']); df_price['dt'] = pd.to_datetime(df_price['日期'])
-    df_m = pd.merge_asof(df_share.sort_values('dt'), df_price.sort_values('dt')[['dt', '收盤價(元)']], on='dt', direction='backward').sort_values('dt', ascending=False)
+    # 使用 .copy() 避免 dt 欄位污染主表
+    df_s = df_share.copy()
+    df_p = df_price.copy()
+    df_s['dt'] = pd.to_datetime(df_s['日期'])
+    df_p['dt'] = pd.to_datetime(df_p['日期'])
+    df_m = pd.merge_asof(df_s.sort_values('dt'), df_p.sort_values('dt')[['dt', '收盤價(元)']], on='dt', direction='backward').sort_values('dt', ascending=False)
+    
+    diff_dict = dict(zip(df_branch_diff['日期'], df_branch_diff['買賣家數差'])) if not df_branch_diff.empty else {}
     
     out = []
     for _, row in df_m.iterrows():
@@ -362,7 +371,6 @@ def process_tdcc_dynamic(df_share, df_price, dead_chip_str, auto_dead_chip, base
             status = "🔴 絕對控盤" if c_val >= 0.5 else "🟡 高度鎖碼" if c_val >= 0.3 else "🔵 初步集結" if c_val >= 0.15 else "⚪ 籌碼渙散"
             c_display = round(c_val * 100, 1)
 
-        auto_diff = branch_diff_map.get(d_str, "-")
         chip_label = f"{round(dead_chip_pct, 2)} ({'自動' if is_auto_chip else '手動'})" if dead_chip_pct > 0 else "-"
 
         out.append({
@@ -371,7 +379,7 @@ def process_tdcc_dynamic(df_share, df_price, dead_chip_str, auto_dead_chip, base
             "精算門檻(張)": ceiling_t, "級距總佔比(%)": round(l_pct, 2),
             "死籌碼(%)": chip_label,
             "活大戶影響力C(%)": c_display,
-            "買賣家數差": auto_diff,
+            "買賣家數差": diff_dict.get(d_str, "-"),
             "實戰判定": status
         })
     return pd.DataFrame(out)
@@ -417,6 +425,8 @@ def process_fut_inst(df):
     if df.empty: return pd.DataFrame()
     df['net'] = pd.to_numeric(df['long_open_interest_balance_volume'], errors='coerce').fillna(0) - pd.to_numeric(df['short_open_interest_balance_volume'], errors='coerce').fillna(0)
     pdf = df.pivot_table(index='date', columns='institutional_investors', values='net', fill_value=0).reset_index()
+    # 📌 強制抹除樞紐分析殘留的 institutional_investors 幽靈表頭
+    pdf.columns.name = None
     for col in ['Foreign_Investor', 'Investment_Trust', 'Dealer']:
         if col not in pdf.columns: pdf[col] = 0
     return pdf.rename(columns={'date': '日期', 'Foreign_Investor': '外資多空(口)', 'Investment_Trust': '投信多空(口)', 'Dealer': '自營多空(口)'}).tail(15).sort_values('日期', ascending=False)
@@ -425,6 +435,8 @@ def process_opt_inst(df):
     if df.empty: return pd.DataFrame()
     df['net_oi_amt'] = ((pd.to_numeric(df['long_open_interest_balance_amount'], errors='coerce').fillna(0) - pd.to_numeric(df['short_open_interest_balance_amount'], errors='coerce').fillna(0)) / 1000).round().astype(int)
     pdf = df.pivot_table(index=['date', 'call_put'], columns='institutional_investors', values='net_oi_amt', fill_value=0).reset_index()
+    # 📌 強制抹除樞紐分析殘留的 institutional_investors 幽靈表頭
+    pdf.columns.name = None
     for col in ['Foreign_Investor', 'Investment_Trust', 'Dealer']:
         if col not in pdf.columns: pdf[col] = 0
     pdf = pdf.rename(columns={'date': '日期', 'call_put': '契約', 'Foreign_Investor': '外資淨額(千元)', 'Investment_Trust': '投信淨額(千元)', 'Dealer': '自營商淨額(千元)'})
@@ -458,7 +470,7 @@ def process_cbas(df):
 # 執行主引擎
 # ==========================================
 if run_btn:
-    with st.spinner(f"正在擷取 {stock_id} 數據，並全自動計算家數差..."):
+    with st.spinner(f"正在擷取 {stock_id} 數據，並進行隱形欄位清除與精算..."):
         start_probe = (datetime.date.today() - datetime.timedelta(days=1095)).strftime("%Y-%m-%d")
         df_p_raw = fetch_fm("TaiwanStockPrice", start_probe)
         if df_p_raw.empty: st.error("查無股價資料"); st.stop()
@@ -469,14 +481,14 @@ if run_btn:
         auto_dead_chip = scrape_director_holding(stock_id)
         
         df_branch_raw = fetch_fm_branch_fast_parallel(actual_dates[:60])
-        branch_diff_map = process_branch_diff(df_branch_raw, actual_dates)
+        df_branch_diff = process_branch_diff(df_branch_raw, actual_dates)
         
         df_share_raw = fetch_fm("TaiwanStockHoldingSharesPer", d_60)
         df_share_wide, df_share_unit, df_share_people, df_share_pct, df_share_avg = process_tdcc(df_share_raw)
         
         df_price = process_price(df_p_raw)
         
-        df_share_dynamic = process_tdcc_dynamic(df_share_wide, df_price, dead_chip_input, auto_dead_chip, money_input, influence_input, branch_diff_map)
+        df_share_dynamic = process_tdcc_dynamic(df_share_wide, df_price, dead_chip_input, auto_dead_chip, money_input, influence_input, df_branch_diff)
         
         df_twse = scrape_twse_block(actual_dates[0])
         df_margin = process_margin(fetch_fm("TaiwanStockMarginPurchaseShortSale", d_60))
@@ -510,7 +522,7 @@ if run_btn:
         df_cbas = process_cbas(df_cbas_raw[df_cbas_raw['cb_id'].astype(str).str.startswith(stock_id)]) if not df_cbas_raw.empty else pd.DataFrame()
         df_opt_inst = process_opt_inst(fetch_fm("TaiwanOptionInstitutionalInvestors", d_60, specific_id=False, target_id="TXO"))
 
-        st.success("✅ V41 引擎運算完畢！數字已全面靠右對齊。")
+        st.success("✅ V43 引擎運算完畢！幽靈欄位已徹底斬除。")
         def show(title, df):
             st.markdown(f"#### {title}")
             if df is None or df.empty: st.warning("此區塊查無數據或無發行紀錄")
@@ -545,9 +557,7 @@ if run_btn:
         show("▼▼▼ 20. 八大官股進出 (今日) [來源：FinMind] ▼▼▼", df_gov)
         show("▼▼▼ 21. CBAS 可轉債數據 [來源：FinMind] ▼▼▼", df_cbas)
         show("▼▼▼ 22. 台指選擇權三大法人未平倉 (大盤) [來源：FinMind] ▼▼▼", df_opt_inst)
-        
-        st.markdown("#### ▼▼▼ 23. 買賣家數差明細 ▼▼▼")
-        st.info(f"今日家數差：{branch_diff_map.get(actual_dates[0], '查無數據')}")
+        show("▼▼▼ 23. 買賣家數差明細 (近15日) [來源：系統自算] ▼▼▼", df_branch_diff)
 
         st.divider(); st.subheader("📋 【給 Gemini 的量化分析資料包】")
         p = f"請幫我分析 {stock_id} 的量化籌碼。大戶門檻已雙軸精算，買賣家數差已由分點明細自動加總。\n\n"
@@ -576,6 +586,6 @@ if run_btn:
         p += format_to_gas(df_gov, "20. 八大官股進出 (今日)")
         p += format_to_gas(df_cbas, "21. CBAS 可轉債數據")
         p += format_to_gas(df_opt_inst, "22. 台指選擇權三大法人未平倉 (大盤)")
-        p += f"▼▼▼ 23. 買賣家數差明細 ▼▼▼, \n{str(branch_diff_map.get(actual_dates[0], '查無數據')) + ','}\n"
+        p += format_to_gas(df_branch_diff, "23. 買賣家數差明細 (近15日)")
         
         st.code(p, language="text")
