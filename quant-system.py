@@ -9,7 +9,7 @@ import re
 import concurrent.futures
 
 # 設定網頁標題與佈局
-st.set_page_config(page_title="台股全息量化系統 (V10.2 上帝視角版)", layout="wide")
+st.set_page_config(page_title="台股全息量化系統 (V10.3 終極破甲版)", layout="wide")
 
 # 內建最新 Sponsor Token
 FINMIND_TOKEN = "eyJ0eXAiOiJKV1QiLCJhbGciOiJIUzI1NiJ9.eyJkYXRlIjoiMjAyNi0wNC0xMCAyMDoyMDo0NiIsInVzZXJfaWQiOiJUb25lMSIsImVtYWlsIjoidG9uZWhzaWVAZ21haWwuY29tIiwiaXAiOiI2MS42Mi43LjE5OCJ9.7s3-IrkfdiUyTvGiZQGESBUBAPHQTnd4pwYcn8_J-CY"
@@ -23,14 +23,14 @@ table.dataframe th { text-align: center !important; }
 """, unsafe_allow_html=True)
 
 st.title("🤖 交易員實戰手冊：全息量化擷取系統")
-st.markdown("✅ **V10.2 終極劇本雷達** | ✅ **集保與家數差淨化分離** | ✅ **四引擎終極防呆爬蟲 (含 Goodinfo)**")
+st.markdown("✅ **V10.3 終極劇本雷達** | ✅ **集保與家數差淨化分離** | ✅ **Goodinfo 精準死籌碼引擎**")
 
 # UI 輸入區
 col1, col2, col3, col4 = st.columns([1, 1, 1, 1])
 with col1:
     stock_id = st.text_input("個股代號", value="7711")
 with col2:
-    dead_chip_input = st.text_input("死籌碼 %", placeholder="不填則四引擎自動抓")
+    dead_chip_input = st.text_input("死籌碼 %", placeholder="不填則 Goodinfo 自動抓")
 with col3:
     money_input = st.text_input("財力設定(萬)", value="5000")
 with col4:
@@ -68,13 +68,38 @@ def format_pledge_to_gas(df_summary, df_detail):
     return format_to_gas(df_summary, "9. 董監大股東質設 (餘額與斷頭預警)") + format_to_gas(df_detail, "董監大股東質設 (異動明細)")
 
 def scrape_director_holding(target_id):
-    """📌 V10.2 終極版四引擎死籌碼爬蟲"""
+    """📌 V10.3 終極版死籌碼爬蟲：優先解析 Goodinfo 歷史表格，避開法人重複計算"""
     headers = {
         "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
         "Accept-Language": "zh-TW,zh;q=0.9,en-US;q=0.8,en;q=0.7",
     }
     
-    # 優先權 1：Yahoo 財經 API (反應最快)
+    # 優先權 1：Goodinfo 董監持股明細表 (最準確)
+    try:
+        url_good = f"https://goodinfo.tw/tw/StockDirectorSharehold.asp?STOCK_ID={target_id}"
+        headers_good = headers.copy()
+        headers_good["Referer"] = f"https://goodinfo.tw/tw/StockDetail.asp?STOCK_ID={target_id}"
+        res = requests.get(url_good, headers=headers_good, timeout=8)
+        res.encoding = 'utf-8'
+        
+        dfs = pd.read_html(StringIO(res.text))
+        for df in dfs:
+            if isinstance(df.columns, pd.MultiIndex):
+                # 壓平多層表頭，並清理多餘字串
+                cols = ['_'.join(str(c) for c in col if 'Unnamed' not in str(c)).strip('_') for col in df.columns.values]
+                df.columns = cols
+            
+            # 尋找「全體董監持股_持股(%)」欄位
+            target_col = [c for c in df.columns if '全體董監持股' in c and '持股(%)' in c.replace(' ', '')]
+            if target_col:
+                # 往下找第一筆非 '-' 的有效數字 (避開當月尚未結算的空值)
+                for val in df[target_col[0]]:
+                    if str(val).strip() not in ['-', '']:
+                        parsed_val = float(str(val).strip())
+                        if 0 < parsed_val < 100.0: return parsed_val
+    except: pass
+
+    # 優先權 2：Yahoo 財經 API
     try:
         url_yahoo = f"https://tw.stock.yahoo.com/quote/{target_id}/profile"
         res = requests.get(url_yahoo, headers=headers, timeout=5)
@@ -84,28 +109,15 @@ def scrape_director_holding(target_id):
             if 0 < val < 100.0: return val
     except: pass
 
-    # 優先權 2：鉅亨網 後台 API
+    # 優先權 3：鉅亨網 後台 API
     try:
         url_cnyes = f"https://ws.cnyes.com/web/api/v1/page/normal/stock/TWS/{target_id}/profile"
         res = requests.get(url_cnyes, headers=headers, timeout=5).json()
         val = float(res['data']['profile']['directorHoldPercent'])
         if 0 < val < 100.0: return val
     except: pass
-
-    # 優先權 3：Goodinfo 台灣股市資訊網 (最齊全，終極備援)
-    try:
-        url_goodinfo = f"https://goodinfo.tw/tw/StockValueDetail.asp?STOCK_ID={target_id}"
-        headers_good = headers.copy()
-        headers_good["Referer"] = f"https://goodinfo.tw/tw/StockDetail.asp?STOCK_ID={target_id}"
-        res = requests.get(url_goodinfo, headers=headers_good, timeout=8)
-        res.encoding = 'utf-8'
-        match = re.search(r'董監持股比例.*?([\d\.]+)\s*%', res.text)
-        if match: 
-            val = float(match.group(1))
-            if 0 < val < 100.0: return val
-    except: pass
     
-    # 優先權 4：富邦證券 zca 基本資料 (傳統網頁解析)
+    # 優先權 4：富邦證券 (最後備援)
     try:
         url_fubon = f"https://fubon-ebrokerdj.fbs.com.tw/z/zc/zca/zca_{target_id}.djhtm"
         res = requests.get(url_fubon, headers=headers, timeout=5)
@@ -618,7 +630,7 @@ def process_cbas(df):
 # 執行主引擎
 # ==========================================
 if run_btn:
-    with st.spinner(f"正在擷取 {stock_id} 數據，並啟動 V10.2 上帝視角雷達..."):
+    with st.spinner(f"正在擷取 {stock_id} 數據，並啟動 V10.3 上帝視角雷達..."):
         start_probe = (datetime.date.today() - datetime.timedelta(days=1095)).strftime("%Y-%m-%d")
         df_p_raw = fetch_fm("TaiwanStockPrice", start_probe)
         if df_p_raw.empty: st.error("查無股價資料"); st.stop()
@@ -674,7 +686,7 @@ if run_btn:
         df_cbas = process_cbas(df_cbas_raw[df_cbas_raw['cb_id'].astype(str).str.startswith(stock_id)]) if not df_cbas_raw.empty else pd.DataFrame()
         df_opt_inst = process_opt_inst(fetch_fm("TaiwanOptionInstitutionalInvestors", d_60, specific_id=False, target_id="TXO"))
 
-        st.success("✅ V10.2 引擎運算完畢！四引擎 (Yahoo/鉅亨/Goodinfo/富邦) 破甲完成。")
+        st.success("✅ V10.3 引擎運算完畢！四引擎 (Goodinfo/Yahoo/鉅亨/富邦) 破甲完成。")
         def show(title, df):
             st.markdown(f"#### {title}")
             if df is None or df.empty: st.warning("此區塊查無數據或無發行紀錄")
@@ -713,7 +725,7 @@ if run_btn:
         show("▼▼▼ 23. 買賣家數差明細 (近15日) [來源：系統自算] ▼▼▼", df_branch_diff)
 
         st.divider(); st.subheader("📋 【給 Gemini 的量化分析資料包】")
-        p = f"請幫我分析 {stock_id} 的量化籌碼。已套用 V10.2 波段雷達，大戶門檻已雙軸精算。\n\n"
+        p = f"請幫我分析 {stock_id} 的量化籌碼。已套用 V10.3 波段雷達，大戶門檻已雙軸精算。\n\n"
         p += format_to_gas(df_share_dynamic, "1-1. 雙軸活大戶鎖碼判定表 (C-Value)")
         p += format_to_gas(df_v10_radar, "1-2. V10.0 上帝視角綜合診斷雷達 (含專家建議)")
         p += format_to_gas(df_share_unit, "2-1. 集保分級 - 張數表")
