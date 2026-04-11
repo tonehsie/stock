@@ -57,11 +57,10 @@ def format_to_gas(df, title):
     lines = [line.replace('"', '') + ", " for line in csv_str.strip().split('\n')]
     return header + "\n".join(lines) + "\n"
 
-# 幫您補上防呆，避免程式執行到最後壞掉
 def format_pledge_to_gas(df_summary, df_detail):
     if df_summary is None or df_summary.empty:
-        return "▼▼▼ 董監大股東質設 ▼▼▼, \n此區塊查無最新數據或無發行紀錄, \n"
-    return format_to_gas(df_summary, "董監大股東質設")
+        return "▼▼▼ 9. 董監大股東質設 ▼▼▼, \n此區塊查無最新數據或無發行紀錄, \n"
+    return format_to_gas(df_summary, "9. 董監大股東質設 (餘額與斷頭預警)") + format_to_gas(df_detail, "董監大股東質設 (異動明細)")
 
 # ==========================================
 # 資料清洗與爬蟲引擎
@@ -266,7 +265,7 @@ def process_tdcc(df):
     df_out = pd.merge(df_total, df_pivot, on='date', how='left').rename(columns={'date': '日期'}).sort_values('日期', ascending=False)
     return df_out
 
-# ✅ 已經幫您改好：完美接收 total_張數，修正 7.17 億股本
+# ✅ 完美接收 total_張數，修正股本
 def process_tdcc_dynamic(df_share, df_price, dead_chip_str, base_money_str, influence_pct_str):
     if df_share.empty or df_price.empty: return pd.DataFrame()
     
@@ -395,6 +394,47 @@ def process_fut_inst(df):
     return pdf.rename(columns={'date': '日期', 'Foreign_Investor': '外資多空(口)', 'Investment_Trust': '投信多空(口)', 'Dealer': '自營多空(口)'}).tail(15).sort_values('日期', ascending=False)
 
 # ==========================================
+# 項目 11 以後新增函式 (空表防呆與繁體中文化)
+# ==========================================
+def process_opt_inst(df):
+    if df.empty: return pd.DataFrame()
+    df['net_oi_amt'] = ((pd.to_numeric(df['long_open_interest_balance_amount'], errors='coerce').fillna(0) - pd.to_numeric(df['short_open_interest_balance_amount'], errors='coerce').fillna(0)) / 1000).round().astype(int)
+    pdf = df.pivot_table(index=['date', 'call_put'], columns='institutional_investors', values='net_oi_amt', fill_value=0).reset_index()
+    for col in ['Foreign_Investor', 'Investment_Trust', 'Dealer']:
+        if col not in pdf.columns: pdf[col] = 0
+    pdf = pdf.rename(columns={'date': '日期', 'call_put': '契約', 'Foreign_Investor': '外資淨額(千元)', 'Investment_Trust': '投信淨額(千元)', 'Dealer': '自營商淨額(千元)'})
+    pdf['契約'] = pdf['契約'].map({'Call': '買權(Call)', 'Put': '賣權(Put)'}).fillna(pdf['契約'])
+    return pdf[['日期', '契約', '外資淨額(千元)', '投信淨額(千元)', '自營商淨額(千元)']].tail(30).sort_values(['日期', '契約'], ascending=[False, True])
+
+def process_per(df):
+    if df.empty: return pd.DataFrame()
+    df_out = df.copy()
+    df_out = df_out.rename(columns={"date":"日期","dividend_yield":"殖利率(%)","PER":"本益比(倍)","PBR":"淨值比(倍)"})
+    for col in ["殖利率(%)", "本益比(倍)", "淨值比(倍)"]:
+        df_out[col] = pd.to_numeric(df_out[col], errors='coerce').round(2)
+    return df_out[['日期', '本益比(倍)', '淨值比(倍)', '殖利率(%)']].tail(15).sort_values('日期', ascending=False)
+
+def process_disp(df):
+    if df.empty: return pd.DataFrame()
+    df_out = df.copy()
+    df_out = df_out.rename(columns={"date":"公告日期","disposition_cnt":"處置次數","condition":"處置條件","measure":"處置措施","period_start":"處置起日","period_end":"處置迄日"})
+    return df_out[['公告日期', '處置次數', '處置起日', '處置迄日', '處置條件', '處置措施']].tail(5).sort_values('公告日期', ascending=False)
+
+def process_div(df):
+    if df.empty: return pd.DataFrame()
+    rename_map = {"date": "公告日期", "year": "股利年份", "StockEarningsDistribution": "盈餘配股(元)", "StockStatutorySurplus": "公積配股(元)", "CashEarningsDistribution": "盈餘配息(元)", "CashStatutorySurplus": "公積配息(元)"}
+    df_out = df.rename(columns=rename_map)
+    cols = [c for c in ["公告日期", "股利年份", "盈餘配息(元)", "公積配息(元)", "盈餘配股(元)", "公積配股(元)"] if c in df_out.columns]
+    return df_out[cols].tail(10).sort_values('公告日期', ascending=False)
+
+def process_cbas(df):
+    if df.empty: return pd.DataFrame()
+    rename_map = {"date": "日期", "cb_id": "可轉債代號", "cb_name": "可轉債名稱", "ConversionPrice": "轉換價(元)", "PriceOfUnderlyingStock": "標的股價(元)", "OutstandingAmount": "未償還餘額", "CouponRate": "票面利率(%)"}
+    df_out = df.rename(columns=rename_map)
+    cols = [c for c in ["日期", "可轉債代號", "可轉債名稱", "轉換價(元)", "標的股價(元)", "未償還餘額", "票面利率(%)"] if c in df_out.columns]
+    return df_out[cols]
+
+# ==========================================
 # 執行主引擎
 # ==========================================
 if run_btn:
@@ -403,7 +443,8 @@ if run_btn:
         df_price_raw = fetch_fm("TaiwanStockPrice", start_probe)
         if df_price_raw.empty: st.error("查無股價資料"); st.stop()
         
-        d_60 = sorted(df_price_raw['date'].unique(), reverse=True)[59] if len(df_price_raw['date'].unique()) > 60 else df_price_raw['date'].min()
+        actual_dates = sorted(df_price_raw['date'].unique().tolist(), reverse=True)
+        d_60 = actual_dates[59] if len(actual_dates) >= 60 else actual_dates[-1]
         
         df_share_raw = fetch_fm("TaiwanStockHoldingSharesPer", d_60)
         df_share_expanded = process_tdcc(df_share_raw)
@@ -411,7 +452,7 @@ if run_btn:
         
         df_share_dynamic = process_tdcc_dynamic(df_share_expanded, df_price, dead_chip_input, money_input, influence_input)
         
-        df_twse = scrape_twse_block(df_price_raw['date'].max())
+        df_twse = scrape_twse_block(actual_dates[0])
         df_margin = process_margin(fetch_fm("TaiwanStockMarginPurchaseShortSale", d_60))
         df_inst = process_inst(fetch_fm("TaiwanStockInstitutionalInvestorsBuySell", d_60))
         df_rev_raw = fetch_fm("TaiwanStockMonthRevenue", "2024-01-01")
@@ -421,15 +462,41 @@ if run_btn:
             df_rev = df_rev_raw.rename(columns={"revenue":"月營收(百萬元)"})[['營收月份','月營收(百萬元)']].tail(15) if '營收月份' in df_rev_raw.columns else pd.DataFrame()
             if not df_rev.empty: df_rev['月營收(百萬元)'] = (df_rev['月營收(百萬元)']/1000000).round().astype(int)
         
-        df_branch_raw = fetch_fm_branch_fast_parallel(sorted(df_price_raw['date'].unique(), reverse=True)[:60])
-        df_b_today = process_branch_data(df_branch_raw, 1, sorted(df_price_raw['date'].unique(), reverse=True))
+        # 分點資料並發抓取 (包含前一日到近60日)
+        df_branch_raw = fetch_fm_branch_fast_parallel(actual_dates[:60])
+        df_b_today = process_branch_data(df_branch_raw, 1, actual_dates)
+        df_b_prev1 = process_branch_data(df_branch_raw, 1, actual_dates[1:]) if len(actual_dates) > 1 else pd.DataFrame()
+        df_b_3 = process_branch_data(df_branch_raw, 3, actual_dates)
+        df_b_10 = process_branch_data(df_branch_raw, 10, actual_dates)
+        df_b_20 = process_branch_data(df_branch_raw, 20, actual_dates)
+        df_b_30 = process_branch_data(df_branch_raw, 30, actual_dates)
+        df_b_60 = process_branch_data(df_branch_raw, 60, actual_dates)
+
+        # 官股進出
+        df_gov = pd.DataFrame()
+        if not df_b_today.empty:
+            govs = ["台銀", "土銀", "彰銀", "第一", "兆豐", "華南", "合庫", "台企銀"]
+            df_gov = df_b_today[df_b_today.astype(str).apply(lambda x: x.str.contains('|'.join(govs))).any(axis=1)]
+
         df_pledge_summary, df_pledge_detail = scrape_fubon_pledge(df_price_raw)
         df_fut = process_fut_inst(fetch_fm("TaiwanFuturesInstitutionalInvestors", d_60, specific_id=False, target_id="TX"))
+        
+        # 新增 11 以後項目抓取
+        df_div = process_div(fetch_fm("TaiwanStockDividend", "2015-01-01"))
+        df_per = process_per(fetch_fm("TaiwanStockPER", d_60))
+        start_probe_180 = (datetime.date.today() - datetime.timedelta(days=180)).strftime("%Y-%m-%d")
+        df_disp = process_disp(fetch_fm("TaiwanStockDispositionSecuritiesPeriod", start_probe_180))
+        
+        df_cbas_raw = fetch_fm("TaiwanStockConvertibleBondDailyOverview", actual_dates[0], specific_id=False)
+        df_cbas_filtered = df_cbas_raw[df_cbas_raw['cb_id'].astype(str).str.startswith(stock_id)] if not df_cbas_raw.empty else pd.DataFrame()
+        df_cbas = process_cbas(df_cbas_filtered)
+        
+        df_opt_inst = process_opt_inst(fetch_fm("TaiwanOptionInstitutionalInvestors", d_60, specific_id=False, target_id="TXO"))
 
-        st.success("✅ 雙軸 C-Value 引擎運算完畢！數學解析器已過濾重複格式干擾。")
+        st.success("✅ 雙軸 C-Value 引擎運算完畢！完整資料包已掛載。")
         def show(title, df):
             st.markdown(f"#### {title}")
-            if df is None or df.empty: st.warning("此區塊查無數據")
+            if df is None or df.empty: st.warning("此區塊查無數據或無發行紀錄")
             else: st.markdown(df.to_html(index=False, border=1), unsafe_allow_html=True)
             
         show("▼▼▼ 1. 雙軸活大戶鎖碼判定表 (C-Value) ▼▼▼", df_share_dynamic)
@@ -439,23 +506,58 @@ if run_btn:
         show("▼▼▼ 5. 法人買賣超 [來源：FinMind] ▼▼▼", df_inst)
         show("▼▼▼ 6. 收盤價量 [來源：FinMind] ▼▼▼", df_price)
         show("▼▼▼ 7. 月營收 (百萬元) [來源：FinMind] ▼▼▼", df_rev)
-        show(f"▼▼▼ 8. 主力分點 - 今日 [來源：FinMind] ▼▼▼", df_b_today)
+        show(f"▼▼▼ 8. 主力分點 - 今日 ({actual_dates[0]}) [來源：FinMind] ▼▼▼", df_b_today)
+        
         st.markdown("#### ▼▼▼ 9. 董監大股東質設明細 [來源：富邦證券] ▼▼▼")
-        if not df_pledge_summary.empty: st.markdown(df_pledge_summary.to_html(index=False, border=1), unsafe_allow_html=True)
-        show("▼▼▼ 10. 台指期貨三大法人未平倉 (大盤) ▼▼▼", df_fut)
+        if df_pledge_detail.empty: st.warning("此區塊查無數據或無發行紀錄")
+        else:
+            if not df_pledge_summary.empty: st.markdown(df_pledge_summary.to_html(index=False, border=1), unsafe_allow_html=True)
+            st.markdown(df_pledge_detail.to_html(index=False, border=1), unsafe_allow_html=True)
+            
+        show("▼▼▼ 10. 台指期貨三大法人未平倉 (大盤) [來源：FinMind] ▼▼▼", df_fut)
+        
+        # 顯示 11 以後項目
+        show("▼▼▼ 11. 歷年股利 [來源：FinMind] ▼▼▼", df_div)
+        show("▼▼▼ 12. 本益比、淨值比與殖利率 [來源：FinMind] ▼▼▼", df_per)
+        show("▼▼▼ 13. 處置有價證券狀態 [來源：FinMind] ▼▼▼", df_disp)
+        show(f"▼▼▼ 14. 主力分點 - 前一日 ({actual_dates[1] if len(actual_dates)>1 else '無'}) [來源：FinMind] ▼▼▼", df_b_prev1)
+        show("▼▼▼ 15. 主力分點 - 近3日 [來源：FinMind] ▼▼▼", df_b_3)
+        show("▼▼▼ 16. 主力分點 - 近10日 [來源：FinMind] ▼▼▼", df_b_10)
+        show("▼▼▼ 17. 主力分點 - 近20日 [來源：FinMind] ▼▼▼", df_b_20)
+        show("▼▼▼ 18. 主力分點 - 近30日 [來源：FinMind] ▼▼▼", df_b_30)
+        show("▼▼▼ 19. 主力分點 - 近60日 [來源：FinMind] ▼▼▼", df_b_60)
+        show("▼▼▼ 20. 八大官股進出 (今日) [來源：FinMind] ▼▼▼", df_gov)
+        show("▼▼▼ 21. CBAS 可轉債數據 [來源：FinMind] ▼▼▼", df_cbas)
+        show("▼▼▼ 22. 台指選擇權三大法人未平倉 (大盤) [來源：FinMind] ▼▼▼", df_opt_inst)
+        
+        st.markdown("#### ▼▼▼ 23. 買賣家數差明細 (手動) [來源：使用者輸入] ▼▼▼")
+        if not bs_diff: st.warning("此區塊目前查無數據")
+        else: st.info(f"使用者輸入數值：{bs_diff}")
 
         st.divider(); st.subheader("📋 【給 Gemini 的量化分析資料包】")
         p = f"請幫我分析 {stock_id} 的量化籌碼。大戶門檻已根據「財力與影響力」雙軸精算，並以 C-Value 過濾死籌碼。\n\n"
         p += format_to_gas(df_share_dynamic, "1. 雙軸活大戶鎖碼判定表 (C-Value)")
         p += format_to_gas(df_share_expanded, "2. 集保詳細分級")
-        p += format_to_gas(df_margin, "3. 散戶資券餘額")
-        p += format_to_gas(df_inst, "4. 法人買賣超")
-        p += format_to_gas(df_price, "5. 收盤價量")
-        p += format_to_gas(df_b_today, "6. 今日主力分點")
+        p += format_to_gas(df_twse, "3. 鉅額交易明細")
+        p += format_to_gas(df_margin, "4. 散戶資券餘額")
+        p += format_to_gas(df_inst, "5. 法人買賣超")
+        p += format_to_gas(df_price, "6. 收盤價量")
+        p += format_to_gas(df_rev, "7. 月營收 (百萬元)")
+        p += format_to_gas(df_b_today, f"8. 主力分點 - 今日 ({actual_dates[0]})")
         p += format_pledge_to_gas(df_pledge_summary, df_pledge_detail)
-        p += format_to_gas(df_fut, "8. 大盤期貨籌碼")
+        p += format_to_gas(df_fut, "10. 台指期貨三大法人未平倉 (大盤)")
+        p += format_to_gas(df_div, "11. 歷年股利")
+        p += format_to_gas(df_per, "12. 本益比、淨值比與殖利率")
+        p += format_to_gas(df_disp, "13. 處置有價證券狀態")
+        p += format_to_gas(df_b_prev1, "14. 主力分點 - 前一日")
+        p += format_to_gas(df_b_3, "15. 主力分點 - 近3日")
+        p += format_to_gas(df_b_10, "16. 主力分點 - 近10日")
+        p += format_to_gas(df_b_20, "17. 主力分點 - 近20日")
+        p += format_to_gas(df_b_30, "18. 主力分點 - 近30日")
+        p += format_to_gas(df_b_60, "19. 主力分點 - 近60日")
+        p += format_to_gas(df_gov, "20. 八大官股進出 (今日)")
+        p += format_to_gas(df_cbas, "21. CBAS 可轉債數據")
+        p += format_to_gas(df_opt_inst, "22. 台指選擇權三大法人未平倉 (大盤)")
+        p += f"▼▼▼ 23. 買賣家數差明細 (手動) ▼▼▼, \n{bs_diff + ',' if bs_diff else '此區塊查無最新數據或無發行紀錄,'}\n"
+        
         st.code(p, language="text")
-
-# ==========================================
-# 請將您手邊的 項目 11 以後程式碼貼在這邊以下
-# ==========================================
