@@ -9,7 +9,7 @@ import re
 import concurrent.futures
 
 # 設定網頁標題與佈局
-st.set_page_config(page_title="台股全息量化系統 (V13.4 穩定修復版)", layout="wide")
+st.set_page_config(page_title="台股全息量化系統 (V13.5 智能強度版)", layout="wide")
 
 # 內建最新 Sponsor Token
 FINMIND_TOKEN = "eyJ0eXAiOiJKV1QiLCJhbGciOiJIUzI1NiJ9.eyJkYXRlIjoiMjAyNi0wNC0xMCAyMDoyMDo0NiIsInVzZXJfaWQiOiJUb25lMSIsImVtYWlsIjoidG9uZWhzaWVAZ21haWwuY29tIiwiaXAiOiI2MS42Mi43LjE5OCJ9.7s3-IrkfdiUyTvGiZQGESBUBAPHQTnd4pwYcn8_J-CY"
@@ -24,7 +24,7 @@ table.radar-table td:last-child { text-align: left !important; }
 """, unsafe_allow_html=True)
 
 st.title("🤖 交易員實戰手冊：全息量化擷取系統")
-st.markdown("✅ **V13.4 專家雷達 (高敏防雷+收盤價對照)** | ✅ **主力分點群聚顯示** | ✅ **當沖數據回歸**")
+st.markdown("✅ **V13.5 專家雷達 (動態最大強度判定)** | ✅ **主力分點群聚顯示** | ✅ **當沖數據回歸**")
 
 # UI 輸入區
 col1, col2, col3, col4 = st.columns([1, 1, 1, 1])
@@ -214,7 +214,7 @@ def process_branch_top15(df_raw, period_days, actual_dates):
     return out
 
 # ==========================================
-# 質押與鉅額
+# 質押與鉅額 
 # ==========================================
 def extract_fubon_table(html_text, trigger, cols):
     start_idx = html_text.find(trigger)
@@ -457,9 +457,9 @@ def process_tdcc_dynamic(df_share, df_price, dead_chip_str, auto_dead_chip, base
     return out_df
 
 # ==========================================
-# 📌 1-2. V13.4 專家診斷引擎 (高敏防雷版)
+# 📌 1-2. V13.5 專家診斷引擎 (智能強度版)
 # ==========================================
-def get_expert_advice_v13(row, dead_shares):
+def get_expert_advice_v13_5(row, dead_shares):
     advice = []
     if pd.isna(row['1000張變動(%)']): return "⚪ 數據初始化..."
     
@@ -470,9 +470,12 @@ def get_expert_advice_v13(row, dead_shares):
     real_1000_change = row['1000張變動(%)'] * leverage
     real_combat_change = row['作戰區變動(%)'] * leverage
 
-    # 邏輯 1：高檔出貨 / 逃命警報 (高敏防雷版)
+    # 📌 新增：取絕對值最大的強度作為代表
+    max_intensity = real_1000_change if abs(real_1000_change) > abs(real_combat_change) else real_combat_change
+
+    # 邏輯 1：高檔出貨 / 逃命警報 (高敏防雷版，使用 max_intensity)
     if row['總人數變動'] > 800 and (real_1000_change < -0.5 or real_combat_change < -0.5):
-        advice.append(f"💀 [逃命警報] 散戶爆量接刀，活籌碼流出強度 {real_combat_change:.1f}%")
+        advice.append(f"💀 [逃命警報] 散戶爆量接刀，活籌碼流出強度 {max_intensity:.1f}%")
         return " | ".join(advice)
 
     # 邏輯 2：真軋空 vs 假質押
@@ -505,7 +508,6 @@ def process_v13_ultimate_radar(df_wide, dead_chip_val, df_price):
     
     df = df_wide.sort_values('日期', ascending=True).copy()
     
-    # 📌 匯入收盤價，處理時間對齊問題 (這行修正為 df_price)
     df['dt_end'] = pd.to_datetime(df['日期'])
     df_p = df_price.copy()
     df_p['dt'] = pd.to_datetime(df_p['日期'])
@@ -514,17 +516,12 @@ def process_v13_ultimate_radar(df_wide, dead_chip_val, df_price):
     df['總股東人數'] = df['總人數(人)']
     df['1000張以上佔比(%)'] = df['1000張以上_比例(%)']
     
-    # 對應 Level 12 (中實戶 200~400張)
     df['中實戶人數'] = df['200-400張_人數']
     df['中實戶總數'] = df['200-400張_張數']
     
-    # 核心區總合：400張以上 (Level 13~16)
     df['核心區佔比(%)'] = df['400-600張_比例(%)'] + df['600-800張_比例(%)'] + df['800-1000張_比例(%)'] + df['1000張以上_比例(%)']
-    
-    # 降維打擊作戰區：200~800張總合 (Level 12~14)
     df['作戰區佔比(%)'] = df['200-400張_比例(%)'] + df['400-600張_比例(%)'] + df['600-800張_比例(%)']
 
-    # 散戶指標：總人數變動 (絕對值) 與 變動率(%)
     df['總人數變動'] = df['總股東人數'].diff()
     df['總人數變動率(%)'] = (df['總股東人數'].diff() / df['總股東人數'].shift(1) * 100).round(2)
     df['1000張變動(%)'] = df['1000張以上佔比(%)'].diff().round(2)
@@ -533,13 +530,10 @@ def process_v13_ultimate_radar(df_wide, dead_chip_val, df_price):
     df['中實戶人數變動'] = df['中實戶人數'].diff()
     df['中實戶張數變動'] = df['中實戶總數'].diff()
     
-    # 照妖鏡：K_Value (規律係數)
     df['K_Value'] = np.where(df['中實戶人數變動'] > 0, (df['中實戶張數變動'] / df['中實戶人數變動']).round(1), 0.0)
     
-    # 套用 V13 活籌碼專家診斷引擎
-    df['V13_實戰診斷'] = df.apply(lambda row: get_expert_advice_v13(row, dead_chip_val), axis=1)
+    df['V13_實戰診斷'] = df.apply(lambda row: get_expert_advice_v13_5(row, dead_chip_val), axis=1)
     
-    # 整理輸出格式 (最新日期放最上面)
     report_columns = ['日期', '收盤價(元)', '總人數變動率(%)', '1000張變動(%)', '作戰區變動(%)', 'K_Value', 'V13_實戰診斷']
     final_report = df[report_columns].sort_values('日期', ascending=False).fillna(0).head(10)
     final_report.columns = list(final_report.columns)
@@ -650,7 +644,7 @@ def process_fubon_pledge(df_price_raw):
 # 執行主引擎
 # ==========================================
 if run_btn:
-    with st.spinner(f"正在擷取 {stock_id} 數據，並啟動 V13.4 雷達..."):
+    with st.spinner(f"正在擷取 {stock_id} 數據，並啟動 V13.5 雷達..."):
         start_probe = (datetime.date.today() - datetime.timedelta(days=1095)).strftime("%Y-%m-%d")
         df_p_raw = fetch_fm("TaiwanStockPrice", start_probe)
         if df_p_raw.empty: st.error("查無股價資料"); st.stop()
@@ -683,7 +677,7 @@ if run_btn:
         # 📌 產生淨化版 C-Value (1-1)
         df_share_dynamic = process_tdcc_dynamic(df_share_wide, df_price, dead_chip_input, auto_dead_chip, money_input, influence_input)
         
-        # 📌 啟動 V13.4 專家診斷雷達 (1-2)，餵入正確的 df_price 避免報錯
+        # 📌 啟動 V13.5 專家診斷雷達 (1-2)，餵入正確的 df_price 避免報錯
         df_v13_radar = process_v13_ultimate_radar(df_share_wide, final_dead_chip, df_price)
         
         df_twse = scrape_twse_block(actual_dates[0])
@@ -722,7 +716,7 @@ if run_btn:
         df_cbas = process_cbas(df_cbas_raw[df_cbas_raw['cb_id'].astype(str).str.startswith(stock_id)]) if not df_cbas_raw.empty else pd.DataFrame()
         df_opt_inst = process_opt_inst(fetch_fm("TaiwanOptionInstitutionalInvestors", d_60, specific_id=False, target_id="TXO"))
 
-        st.success("✅ V13.4 引擎運算完畢！Bug 已徹底修復。")
+        st.success("✅ V13.5 引擎運算完畢！智能強度判定已生效。")
         
         def show(title, df, custom_class=""):
             st.markdown(f"#### {title}")
@@ -732,7 +726,7 @@ if run_btn:
                 st.markdown(df.to_html(classes=class_str, index=False, border=1), unsafe_allow_html=True)
             
         show("▼▼▼ 1-1. 雙軸活大戶鎖碼判定表 (C-Value) ▼▼▼", df_share_dynamic)
-        show("▼▼▼ 1-2. V13.4 專家診斷雷達 (活籌碼槓桿倍數版) ▼▼▼", df_v13_radar, custom_class="radar-table")
+        show("▼▼▼ 1-2. V13.5 專家診斷雷達 (智能強度判定版) ▼▼▼", df_v13_radar, custom_class="radar-table")
         show("▼▼▼ 2-1. 集保分級 - 張數表 (近10週) ▼▼▼", df_share_unit)
         show("▼▼▼ 2-2. 集保分級 - 人數表 (近10週) ▼▼▼", df_share_people)
         show("▼▼▼ 2-3. 集保分級 - 比例表 (%) ▼▼▼", df_share_pct)
@@ -768,9 +762,9 @@ if run_btn:
         show("▼▼▼ 24. CBAS 可轉債數據 [來源：FinMind] ▼▼▼", df_cbas)
 
         st.divider(); st.subheader("📋 【給 Gemini 的量化分析資料包】")
-        p = f"請幫我分析 {stock_id} 的量化籌碼。已套用 V13.4 專家雷達，大戶門檻與活籌碼槓桿已雙軸精算。\n\n"
+        p = f"請幫我分析 {stock_id} 的量化籌碼。已套用 V13.5 專家雷達，大戶門檻與活籌碼槓桿已雙軸精算。\n\n"
         p += format_to_gas(df_share_dynamic, "1-1. 雙軸活大戶鎖碼判定表 (C-Value)")
-        p += format_to_gas(df_v13_radar, "1-2. V13.4 專家診斷雷達 (活籌碼槓桿倍數版)")
+        p += format_to_gas(df_v13_radar, "1-2. V13.5 專家診斷雷達 (智能強度判定版)")
         p += format_to_gas(df_share_unit, "2-1. 集保分級 - 張數表")
         p += format_to_gas(df_share_people, "2-2. 集保分級 - 人數表")
         p += format_to_gas(df_share_pct, "2-3. 集保分級 - 比例表 (%)")
