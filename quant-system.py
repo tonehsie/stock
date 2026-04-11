@@ -1,6 +1,7 @@
 import streamlit as st
 import requests
 import pandas as pd
+import numpy as np
 import datetime
 from io import StringIO
 import time
@@ -22,9 +23,9 @@ table.dataframe th { text-align: center !important; }
 """, unsafe_allow_html=True)
 
 st.title("🤖 交易員實戰手冊：全息量化擷取系統")
-st.markdown("✅ **幽靈欄位徹底清除** | ✅ **數字全靠右對齊** | ✅ **雙軸 C-Value 引擎**")
+st.markdown("✅ **隱藏分身偵測(K值)** | ✅ **爬蟲標籤粉碎** | ✅ **雙軸 C-Value 引擎**")
 
-# UI 輸入區 (徹底移除手動家數差)
+# UI 輸入區
 col1, col2, col3, col4 = st.columns([1, 1, 1, 1])
 with col1:
     stock_id = st.text_input("個股代號", value="7711")
@@ -73,7 +74,8 @@ def scrape_director_holding(target_id):
         headers = {"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36"}
         url = f"https://tw.stock.yahoo.com/quote/{target_id}/profile"
         res = requests.get(url, headers=headers, timeout=5)
-        match = re.search(r'董監持股.*?(\d+\.?\d*)\s*[%％]', res.text)
+        clean_text = re.sub(r'<[^>]+>', '', res.text)
+        match = re.search(r'董監持股\s*(\d+\.?\d*)[%％]', clean_text)
         if match: return float(match.group(1))
     except: pass
     return 0.0
@@ -288,6 +290,10 @@ def process_tdcc(df):
     p_people = df_levels.pivot_table(index='date', columns='LevelClean', values='people', aggfunc='first').reset_index().fillna(0)
     p_pct = df_levels.pivot_table(index='date', columns='LevelClean', values='percent', aggfunc='first').reset_index().fillna(0)
     
+    p_unit.columns.name = None
+    p_people.columns.name = None
+    p_pct.columns.name = None
+    
     lvls = ['1-999股', '1-5張', '5-10張', '10-15張', '15-20張', '20-30張', '30-40張', '40-50張', '50-100張', '100-200張', '200-400張', '400-600張', '600-800張', '800-1000張', '1000張以上']
     for l in lvls:
         if l not in p_unit.columns: p_unit[l] = 0
@@ -317,7 +323,6 @@ def process_tdcc(df):
     return df_wide, df_unit, df_people, df_percent, df_avg
 
 def process_tdcc_dynamic(df_share, df_price, dead_chip_str, auto_dead_chip, base_money_str, influence_pct_str, df_branch_diff):
-    """📌 修正：使用 .copy() 無痕模式防禦 dt 外洩"""
     if df_share.empty or df_price.empty: return pd.DataFrame()
     
     is_auto_chip = False
@@ -333,7 +338,6 @@ def process_tdcc_dynamic(df_share, df_price, dead_chip_str, auto_dead_chip, base
     try: influence_rate = float(str(influence_pct_str).replace('%', '').strip()) / 100.0 if influence_pct_str else 0.005
     except: influence_rate = 0.005
     
-    # 使用 .copy() 避免 dt 欄位污染主表
     df_s = df_share.copy()
     df_p = df_price.copy()
     df_s['dt'] = pd.to_datetime(df_s['日期'])
@@ -385,6 +389,69 @@ def process_tdcc_dynamic(df_share, df_price, dead_chip_str, auto_dead_chip, base
     return pd.DataFrame(out)
 
 # ==========================================
+# 📌 全新子引擎：1-2. 隱藏分身與拆單偵測 (K值)
+# ==========================================
+def process_hidden_clones(df_wide):
+    """
+    從寬表(df_wide)中萃取總人數、大戶佔比與中實戶(200-600張)數據，
+    計算週變動 (Delta) 與 K值，自動判定「分身群聚」或「拆單隱藏」。
+    """
+    if df_wide.empty or len(df_wide) < 2: return pd.DataFrame()
+    
+    # 確保依日期由舊到新排序，方便使用 .diff() 計算變動量
+    df = df_wide.sort_values('日期', ascending=True).copy()
+    
+    # 萃取所需欄位
+    df['總股東人數'] = df['總人數(人)']
+    # 動態大戶佔比：取 1000 張以上 (實戰中最常被用來觀察拆單的頂層)
+    df['1000張以上佔比(%)'] = df['1000張以上_比例(%)']
+    
+    # 中實戶：合併 200-400 與 400-600 兩個級距
+    df['中實戶人數'] = df['200-400張_人數'] + df['400-600張_人數']
+    df['中實戶總數'] = df['200-400張_張數'] + df['400-600張_張數']
+    
+    # 計算變動值 (Delta)
+    df['總人數變動'] = df['總股東人數'].diff()
+    df['1000張變動(%)'] = df['1000張以上佔比(%)'].diff().round(2)
+    df['中實戶人數變動'] = df['中實戶人數'].diff()
+    df['中實戶張數變動'] = df['中實戶總數'].diff()
+    
+    # 計算 K值 (規律係數)：避免除以 0
+    df['規律係數(K值)'] = np.where(
+        df['中實戶人數變動'] != 0, 
+        (df['中實戶張數變動'] / df['中實戶人數變動']).round(1), 
+        0.0
+    )
+    
+    # 系統燈號判定邏輯
+    def generate_signal(row):
+        if pd.isna(row['總人數變動']):
+            return "⚪ 基準週 (無變化)"
+            
+        if row['總人數變動'] < 0 and row['中實戶人數變動'] > 0:
+            if 200 <= row['規律係數(K值)'] <= 600:
+                return "🔴 分身群聚：隱藏鎖碼中！"
+            else:
+                return "🟠 中實戶吃貨 (規律不明顯)"
+                
+        elif row['1000張變動(%)'] < -1.0 and row['中實戶張數變動'] > 0:
+            return "🟡 拆單隱藏：大單換小單"
+            
+        elif row['總人數變動'] > 0 and row['1000張變動(%)'] < 0 and row['中實戶人數變動'] <= 0:
+            return "🟢 籌碼渙散：主力撤退"
+            
+        else:
+            return "🔵 盤整/無明顯異常"
+
+    df['系統判定訊號'] = df.apply(generate_signal, axis=1)
+    
+    # 選擇輸出欄位並轉回由新到舊排序
+    report_columns = ['日期', '總人數變動', '1000張變動(%)', '中實戶人數變動', '中實戶張數變動', '規律係數(K值)', '系統判定訊號']
+    final_report = df[report_columns].sort_values('日期', ascending=False).fillna(0)
+    
+    return final_report
+
+# ==========================================
 # 其餘處理函式
 # ==========================================
 def process_price(df):
@@ -425,7 +492,6 @@ def process_fut_inst(df):
     if df.empty: return pd.DataFrame()
     df['net'] = pd.to_numeric(df['long_open_interest_balance_volume'], errors='coerce').fillna(0) - pd.to_numeric(df['short_open_interest_balance_volume'], errors='coerce').fillna(0)
     pdf = df.pivot_table(index='date', columns='institutional_investors', values='net', fill_value=0).reset_index()
-    # 📌 強制抹除樞紐分析殘留的 institutional_investors 幽靈表頭
     pdf.columns.name = None
     for col in ['Foreign_Investor', 'Investment_Trust', 'Dealer']:
         if col not in pdf.columns: pdf[col] = 0
@@ -435,7 +501,6 @@ def process_opt_inst(df):
     if df.empty: return pd.DataFrame()
     df['net_oi_amt'] = ((pd.to_numeric(df['long_open_interest_balance_amount'], errors='coerce').fillna(0) - pd.to_numeric(df['short_open_interest_balance_amount'], errors='coerce').fillna(0)) / 1000).round().astype(int)
     pdf = df.pivot_table(index=['date', 'call_put'], columns='institutional_investors', values='net_oi_amt', fill_value=0).reset_index()
-    # 📌 強制抹除樞紐分析殘留的 institutional_investors 幽靈表頭
     pdf.columns.name = None
     for col in ['Foreign_Investor', 'Investment_Trust', 'Dealer']:
         if col not in pdf.columns: pdf[col] = 0
@@ -470,7 +535,7 @@ def process_cbas(df):
 # 執行主引擎
 # ==========================================
 if run_btn:
-    with st.spinner(f"正在擷取 {stock_id} 數據，並進行隱形欄位清除與精算..."):
+    with st.spinner(f"正在擷取 {stock_id} 數據，並執行隱藏分身偵測..."):
         start_probe = (datetime.date.today() - datetime.timedelta(days=1095)).strftime("%Y-%m-%d")
         df_p_raw = fetch_fm("TaiwanStockPrice", start_probe)
         if df_p_raw.empty: st.error("查無股價資料"); st.stop()
@@ -486,8 +551,10 @@ if run_btn:
         df_share_raw = fetch_fm("TaiwanStockHoldingSharesPer", d_60)
         df_share_wide, df_share_unit, df_share_people, df_share_pct, df_share_avg = process_tdcc(df_share_raw)
         
-        df_price = process_price(df_p_raw)
+        # 📌 啟動隱藏分身偵測引擎 (K值計算)
+        df_hidden_clones = process_hidden_clones(df_share_wide)
         
+        df_price = process_price(df_p_raw)
         df_share_dynamic = process_tdcc_dynamic(df_share_wide, df_price, dead_chip_input, auto_dead_chip, money_input, influence_input, df_branch_diff)
         
         df_twse = scrape_twse_block(actual_dates[0])
@@ -522,13 +589,15 @@ if run_btn:
         df_cbas = process_cbas(df_cbas_raw[df_cbas_raw['cb_id'].astype(str).str.startswith(stock_id)]) if not df_cbas_raw.empty else pd.DataFrame()
         df_opt_inst = process_opt_inst(fetch_fm("TaiwanOptionInstitutionalInvestors", d_60, specific_id=False, target_id="TXO"))
 
-        st.success("✅ V43 引擎運算完畢！幽靈欄位已徹底斬除。")
+        st.success("✅ V45 引擎運算完畢！隱藏分身偵測 (K值) 已成功載入。")
         def show(title, df):
             st.markdown(f"#### {title}")
             if df is None or df.empty: st.warning("此區塊查無數據或無發行紀錄")
             else: st.markdown(df.to_html(index=False, border=1), unsafe_allow_html=True)
             
-        show("▼▼▼ 1. 雙軸活大戶鎖碼判定表 (C-Value) ▼▼▼", df_share_dynamic)
+        show("▼▼▼ 1-1. 雙軸活大戶鎖碼判定表 (C-Value) ▼▼▼", df_share_dynamic)
+        show("▼▼▼ 1-2. 隱藏分身與拆單偵測 (K值) ▼▼▼", df_hidden_clones)
+        
         show("▼▼▼ 2-1. 集保分級 - 張數表 ▼▼▼", df_share_unit)
         show("▼▼▼ 2-2. 集保分級 - 人數表 ▼▼▼", df_share_people)
         show("▼▼▼ 2-3. 集保分級 - 比例表 (%) ▼▼▼", df_share_pct)
@@ -560,8 +629,9 @@ if run_btn:
         show("▼▼▼ 23. 買賣家數差明細 (近15日) [來源：系統自算] ▼▼▼", df_branch_diff)
 
         st.divider(); st.subheader("📋 【給 Gemini 的量化分析資料包】")
-        p = f"請幫我分析 {stock_id} 的量化籌碼。大戶門檻已雙軸精算，買賣家數差已由分點明細自動加總。\n\n"
-        p += format_to_gas(df_share_dynamic, "1. 雙軸活大戶鎖碼判定表 (C-Value)")
+        p = f"請幫我分析 {stock_id} 的量化籌碼。大戶門檻已雙軸精算，包含 15 日家數差與隱藏分身偵測(K值)。\n\n"
+        p += format_to_gas(df_share_dynamic, "1-1. 雙軸活大戶鎖碼判定表 (C-Value)")
+        p += format_to_gas(df_hidden_clones, "1-2. 隱藏分身與拆單偵測 (K值)")
         p += format_to_gas(df_share_unit, "2-1. 集保分級 - 張數表")
         p += format_to_gas(df_share_people, "2-2. 集保分級 - 人數表")
         p += format_to_gas(df_share_pct, "2-3. 集保分級 - 比例表 (%)")
