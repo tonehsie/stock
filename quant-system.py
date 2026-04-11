@@ -9,7 +9,7 @@ import re
 import concurrent.futures
 
 # 設定網頁標題與佈局
-st.set_page_config(page_title="台股全息量化系統 (V13.3 穩定版)", layout="wide")
+st.set_page_config(page_title="台股全息量化系統 (V13.4 穩定修復版)", layout="wide")
 
 # 內建最新 Sponsor Token
 FINMIND_TOKEN = "eyJ0eXAiOiJKV1QiLCJhbGciOiJIUzI1NiJ9.eyJkYXRlIjoiMjAyNi0wNC0xMCAyMDoyMDo0NiIsInVzZXJfaWQiOiJUb25lMSIsImVtYWlsIjoidG9uZWhzaWVAZ21haWwuY29tIiwiaXAiOiI2MS42Mi43LjE5OCJ9.7s3-IrkfdiUyTvGiZQGESBUBAPHQTnd4pwYcn8_J-CY"
@@ -24,7 +24,7 @@ table.radar-table td:last-child { text-align: left !important; }
 """, unsafe_allow_html=True)
 
 st.title("🤖 交易員實戰手冊：全息量化擷取系統")
-st.markdown("✅ **V13.3 專家雷達 (高敏防雷+收盤價對照)** | ✅ **主力分點群聚顯示** | ✅ **當沖數據回歸**")
+st.markdown("✅ **V13.4 專家雷達 (高敏防雷+收盤價對照)** | ✅ **主力分點群聚顯示** | ✅ **當沖數據回歸**")
 
 # UI 輸入區
 col1, col2, col3, col4 = st.columns([1, 1, 1, 1])
@@ -214,7 +214,7 @@ def process_branch_top15(df_raw, period_days, actual_dates):
     return out
 
 # ==========================================
-# 質押與鉅額 (補回完整實作)
+# 質押與鉅額
 # ==========================================
 def extract_fubon_table(html_text, trigger, cols):
     start_idx = html_text.find(trigger)
@@ -457,7 +457,7 @@ def process_tdcc_dynamic(df_share, df_price, dead_chip_str, auto_dead_chip, base
     return out_df
 
 # ==========================================
-# 📌 1-2. V13.1 專家診斷引擎 (高敏防雷版)
+# 📌 1-2. V13.4 專家診斷引擎 (高敏防雷版)
 # ==========================================
 def get_expert_advice_v13(row, dead_shares):
     advice = []
@@ -505,7 +505,7 @@ def process_v13_ultimate_radar(df_wide, dead_chip_val, df_price):
     
     df = df_wide.sort_values('日期', ascending=True).copy()
     
-    # 📌 匯入收盤價
+    # 📌 匯入收盤價，處理時間對齊問題 (這行修正為 df_price)
     df['dt_end'] = pd.to_datetime(df['日期'])
     df_p = df_price.copy()
     df_p['dt'] = pd.to_datetime(df_p['日期'])
@@ -643,11 +643,14 @@ def process_cbas(df):
     df_res.columns = list(df_res.columns)
     return df_res
 
+def process_fubon_pledge(df_price_raw):
+    return scrape_fubon_pledge(df_price_raw)
+
 # ==========================================
 # 執行主引擎
 # ==========================================
 if run_btn:
-    with st.spinner(f"正在擷取 {stock_id} 數據，並啟動 V13.2 穩定雷達..."):
+    with st.spinner(f"正在擷取 {stock_id} 數據，並啟動 V13.4 雷達..."):
         start_probe = (datetime.date.today() - datetime.timedelta(days=1095)).strftime("%Y-%m-%d")
         df_p_raw = fetch_fm("TaiwanStockPrice", start_probe)
         if df_p_raw.empty: st.error("查無股價資料"); st.stop()
@@ -680,12 +683,12 @@ if run_btn:
         # 📌 產生淨化版 C-Value (1-1)
         df_share_dynamic = process_tdcc_dynamic(df_share_wide, df_price, dead_chip_input, auto_dead_chip, money_input, influence_input)
         
-        # 📌 啟動 V13.2 專家診斷雷達 (1-2)
-        df_v13_radar = process_v13_ultimate_radar(df_share_wide, final_dead_chip, df_p_raw)
+        # 📌 啟動 V13.4 專家診斷雷達 (1-2)，餵入正確的 df_price 避免報錯
+        df_v13_radar = process_v13_ultimate_radar(df_share_wide, final_dead_chip, df_price)
         
         df_twse = scrape_twse_block(actual_dates[0])
         df_margin = process_margin(fetch_fm("TaiwanStockMarginPurchaseShortSale", d_60))
-        df_day_trade = process_day_trading(fetch_fm("TaiwanStockDayTrading", d_60))
+        df_day_trade = process_day_trading(fetch_fm("TaiwanStockDayTrading", d_60)) 
         df_inst = process_inst(fetch_fm("TaiwanStockInstitutionalInvestorsBuySell", d_60))
         
         df_rev_raw = fetch_fm("TaiwanStockMonthRevenue", "2022-01-01")
@@ -710,7 +713,7 @@ if run_btn:
             df_gov = df_b_today[df_b_today.astype(str).apply(lambda x: x.str.contains('|'.join(govs))).any(axis=1)]
             df_gov.columns = list(df_gov.columns)
 
-        df_pledge_summary, df_pledge_detail = scrape_fubon_pledge(df_p_raw)
+        df_pledge_summary, df_pledge_detail = process_fubon_pledge(df_p_raw)
         df_fut = process_fut_inst(fetch_fm("TaiwanFuturesInstitutionalInvestors", d_60, specific_id=False, target_id="TX"))
         df_div = process_div(fetch_fm("TaiwanStockDividend", "2015-01-01"))
         df_per = process_per(fetch_fm("TaiwanStockPER", d_60))
@@ -719,7 +722,7 @@ if run_btn:
         df_cbas = process_cbas(df_cbas_raw[df_cbas_raw['cb_id'].astype(str).str.startswith(stock_id)]) if not df_cbas_raw.empty else pd.DataFrame()
         df_opt_inst = process_opt_inst(fetch_fm("TaiwanOptionInstitutionalInvestors", d_60, specific_id=False, target_id="TXO"))
 
-        st.success("✅ V13.3 引擎運算完畢！Bug 已修復。")
+        st.success("✅ V13.4 引擎運算完畢！Bug 已徹底修復。")
         
         def show(title, df, custom_class=""):
             st.markdown(f"#### {title}")
@@ -729,7 +732,7 @@ if run_btn:
                 st.markdown(df.to_html(classes=class_str, index=False, border=1), unsafe_allow_html=True)
             
         show("▼▼▼ 1-1. 雙軸活大戶鎖碼判定表 (C-Value) ▼▼▼", df_share_dynamic)
-        show("▼▼▼ 1-2. V13.3 專家診斷雷達 (活籌碼槓桿倍數版) ▼▼▼", df_v13_radar, custom_class="radar-table")
+        show("▼▼▼ 1-2. V13.4 專家診斷雷達 (活籌碼槓桿倍數版) ▼▼▼", df_v13_radar, custom_class="radar-table")
         show("▼▼▼ 2-1. 集保分級 - 張數表 (近10週) ▼▼▼", df_share_unit)
         show("▼▼▼ 2-2. 集保分級 - 人數表 (近10週) ▼▼▼", df_share_people)
         show("▼▼▼ 2-3. 集保分級 - 比例表 (%) ▼▼▼", df_share_pct)
@@ -765,9 +768,9 @@ if run_btn:
         show("▼▼▼ 24. CBAS 可轉債數據 [來源：FinMind] ▼▼▼", df_cbas)
 
         st.divider(); st.subheader("📋 【給 Gemini 的量化分析資料包】")
-        p = f"請幫我分析 {stock_id} 的量化籌碼。已套用 V13.3 專家雷達，大戶門檻與活籌碼槓桿已雙軸精算。\n\n"
+        p = f"請幫我分析 {stock_id} 的量化籌碼。已套用 V13.4 專家雷達，大戶門檻與活籌碼槓桿已雙軸精算。\n\n"
         p += format_to_gas(df_share_dynamic, "1-1. 雙軸活大戶鎖碼判定表 (C-Value)")
-        p += format_to_gas(df_v13_radar, "1-2. V13.3 專家診斷雷達 (活籌碼槓桿倍數版)")
+        p += format_to_gas(df_v13_radar, "1-2. V13.4 專家診斷雷達 (活籌碼槓桿倍數版)")
         p += format_to_gas(df_share_unit, "2-1. 集保分級 - 張數表")
         p += format_to_gas(df_share_people, "2-2. 集保分級 - 人數表")
         p += format_to_gas(df_share_pct, "2-3. 集保分級 - 比例表 (%)")
