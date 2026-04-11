@@ -9,7 +9,7 @@ import re
 import concurrent.futures
 
 # 設定網頁標題與佈局
-st.set_page_config(page_title="台股全息量化系統 (V12.0 比例化終極版)", layout="wide")
+st.set_page_config(page_title="台股全息量化系統 (V13.0 活籌碼槓桿版)", layout="wide")
 
 # 內建最新 Sponsor Token
 FINMIND_TOKEN = "eyJ0eXAiOiJKV1QiLCJhbGciOiJIUzI1NiJ9.eyJkYXRlIjoiMjAyNi0wNC0xMCAyMDoyMDo0NiIsInVzZXJfaWQiOiJUb25lMSIsImVtYWlsIjoidG9uZWhzaWVAZ21haWwuY29tIiwiaXAiOiI2MS42Mi43LjE5OCJ9.7s3-IrkfdiUyTvGiZQGESBUBAPHQTnd4pwYcn8_J-CY"
@@ -23,7 +23,7 @@ table.dataframe th { text-align: center !important; }
 """, unsafe_allow_html=True)
 
 st.title("🤖 交易員實戰手冊：全息量化擷取系統")
-st.markdown("✅ **V12.0 專家雷達 (比例化降維防雷版)** | ✅ **集保與家數差淨化分離** | ✅ **五引擎火力全開 (含玩股網+偽裝Cookie)**")
+st.markdown("✅ **V13.0 專家雷達 (活籌碼槓桿倍數版)** | ✅ **集保與家數差淨化分離** | ✅ **五引擎火力全開 (含玩股網+偽裝Cookie)**")
 
 # UI 輸入區
 col1, col2, col3, col4 = st.columns([1, 1, 1, 1])
@@ -439,49 +439,50 @@ def process_tdcc_dynamic(df_share, df_price, dead_chip_str, auto_dead_chip, base
     return out_df
 
 # ==========================================
-# 📌 1-2. V12.0 專家診斷引擎 (比例化降維防雷版)
+# 📌 1-2. V13.0 專家診斷引擎 (活籌碼槓桿倍數版)
 # ==========================================
-def get_expert_advice_v12(row):
+def get_expert_advice_v13(row, dead_shares):
     advice = []
-    
     if pd.isna(row['1000張變動(%)']): return "⚪ 數據初始化..."
     
-    # 邏輯 1：高檔出貨 / 逃命警報 (比例化：散戶暴增 > 2%，大中戶倒貨)
-    if row['總人數變動率(%)'] > 2.0 and (row['1000張變動(%)'] < -0.5 or row['作戰區變動(%)'] < -0.5):
-        advice.append("💀 [逃命警報] 散戶爆量接刀(>2%)，主力高檔瘋狂倒貨，請立即清倉！")
-        return " | ".join(advice) # 最高危險，直接返回，不看其他訊號
+    # 計算「活籌碼槓桿乘數」
+    leverage = 100 / (100 - dead_shares) if dead_shares < 100 and dead_shares > 0 else 1
+    
+    # 計算「真實張力變動」
+    real_1000_change = row['1000張變動(%)'] * leverage
+    real_combat_change = row['作戰區變動(%)'] * leverage
 
-    # 邏輯 2：真軋空 vs 假質押 (配合散戶退場判定)
-    if row['1000張變動(%)'] > 2.0:
+    # 邏輯 1：高檔出貨 / 逃命警報 (加入槓桿判定)
+    if row['總人數變動率(%)'] > 2.0 and (real_1000_change < -1.0 or real_combat_change < -1.0):
+        advice.append(f"💀 [逃命警報] 散戶暴增，活籌碼流出強度 {real_combat_change:.1f}%")
+        return " | ".join(advice)
+
+    # 邏輯 2：真軋空 vs 假質押
+    if real_1000_change > 3.0: 
         if row['總人數變動率(%)'] < 0:
-            advice.append("🚀 [暴力軋空] 大戶暴力掃貨且散戶退場，真金白銀推升！")
+            advice.append(f"🚀 [暴力軋空] 活籌碼強勢壓縮 {real_1000_change:.1f}%")
         else:
-            advice.append("⚠️ [異常集中] 提防大股東質押或內部撥轉，需確認股價漲幅。")
+            advice.append("⚠️ [異常集中] 提防大股東質押，需確認股價漲幅。")
 
-    # 邏輯 3：自動降維打擊 (頂層死水掩護，中層暗中吃貨)
-    if abs(row['1000張變動(%)']) <= 0.05 and row['作戰區變動(%)'] > 0.5 and row['總人數變動率(%)'] < 0:
-        advice.append("🔴 [降維鎖碼] 頂層死水掩護！主力躲在中層(200-800張)暗中吃貨。")
+    # 邏輯 3：自動降維打擊 (針對死水掩護)
+    if abs(row['1000張變動(%)']) <= 0.05 and real_combat_change > 0.8 and row['總人數變動率(%)'] < 0:
+        advice.append(f"🔴 [降維鎖碼] 主力躲在中層暗中吃貨，強度 {real_combat_change:.1f}%")
 
-    # 邏輯 4：定員增持 (人數不變，但作戰區佔比明顯增加)
-    if row['中實戶人數變動'] == 0 and row['作戰區變動(%)'] >= 0.2:
-        advice.append("🔥 [定員增持] 中實戶原班人馬持續加碼，強烈鎖碼意志！")
+    # 邏輯 4：定員增持 (活籌碼邏輯)
+    if row['中實戶人數變動'] == 0 and real_combat_change >= 0.5:
+        advice.append("🔥 [定員增持] 原班人馬加碼，鎖碼意志極強！")
 
     # 邏輯 5：分身群聚 (保留 K值 絕對規律)
     if row['中實戶人數變動'] >= 2 and 200 <= row['K_Value'] <= 600:
         advice.append("🔴 [分身群聚] 偵測到隱藏合資集團，K值極度規律。")
 
-    # 邏輯 6：惡意甩轎 (比例化：散戶湧入 > 1.5%，但主力完全沒退)
-    if row['總人數變動率(%)'] > 1.5 and row['核心區變動(%)'] >= -0.1 and row['作戰區變動(%)'] >= -0.1:
-        if "💀" not in advice[0] if advice else True: # 確保不是出貨
-            advice.append("🟣 [惡意甩轎] 散戶爆量湧入但主力沒退，刻意讓道洗盤。")
-            
-    # 邏輯 7：螞蟻搬家 (籌碼緩步優化)
-    if -2.0 < row['總人數變動率(%)'] < 0 and row['作戰區變動(%)'] > 0:
-        advice.append("🟡 [螞蟻搬家] 籌碼緩步沉澱，具備長線緩漲特徵。")
+    # 邏輯 6：惡意甩轎
+    if row['總人數變動率(%)'] > 1.5 and real_1000_change >= -0.2 and real_combat_change >= -0.2:
+        advice.append("🟣 [惡意甩轎] 散戶湧入但主力未退，刻意讓道洗盤。")
 
-    return " | ".join(advice) if advice else "🔵 趨勢盤整/無明顯主力訊號"
+    return " | ".join(advice) if advice else "🔵 趨勢盤整/無明顯訊號"
 
-def process_v12_ultimate_radar(df_wide):
+def process_v13_ultimate_radar(df_wide, dead_chip_val):
     if df_wide.empty or len(df_wide) < 2: return pd.DataFrame()
     
     df = df_wide.sort_values('日期', ascending=True).copy()
@@ -510,11 +511,11 @@ def process_v12_ultimate_radar(df_wide):
     # 照妖鏡：K_Value (規律係數)
     df['K_Value'] = np.where(df['中實戶人數變動'] > 0, (df['中實戶張數變動'] / df['中實戶人數變動']).round(1), 0.0)
     
-    # 套用 V12 比例化專家診斷引擎
-    df['V12_實戰診斷'] = df.apply(get_expert_advice_v12, axis=1)
+    # 套用 V13 活籌碼專家診斷引擎
+    df['V13_實戰診斷'] = df.apply(lambda row: get_expert_advice_v13(row, dead_chip_val), axis=1)
     
     # 整理輸出格式 (最新日期放最上面)
-    report_columns = ['日期', '總人數變動率(%)', '1000張變動(%)', '作戰區變動(%)', 'K_Value', 'V12_實戰診斷']
+    report_columns = ['日期', '總人數變動率(%)', '1000張變動(%)', '作戰區變動(%)', 'K_Value', 'V13_實戰診斷']
     final_report = df[report_columns].sort_values('日期', ascending=False).fillna(0).head(10)
     final_report.columns = list(final_report.columns)
     return final_report
@@ -621,7 +622,7 @@ def process_cbas(df):
 # 執行主引擎
 # ==========================================
 if run_btn:
-    with st.spinner(f"正在擷取 {stock_id} 數據，並啟動 V12.0 比例化終極雷達..."):
+    with st.spinner(f"正在擷取 {stock_id} 數據，並啟動 V13.0 活籌碼槓桿雷達..."):
         start_probe = (datetime.date.today() - datetime.timedelta(days=1095)).strftime("%Y-%m-%d")
         df_p_raw = fetch_fm("TaiwanStockPrice", start_probe)
         if df_p_raw.empty: st.error("查無股價資料"); st.stop()
@@ -632,9 +633,15 @@ if run_btn:
         
         # 📌 執行死籌碼多重爬蟲引擎，並觸發提示
         auto_dead_chip, chip_engine = scrape_director_holding(stock_id)
+        
+        # 決定最終要用的死籌碼數值，優先使用手動輸入
+        final_dead_chip = 0.0
         if dead_chip_input and str(dead_chip_input).strip() != "":
+            try: final_dead_chip = float(str(dead_chip_input).replace('%', '').strip())
+            except: final_dead_chip = auto_dead_chip
             st.toast("🤖 死籌碼：使用手動輸入數值", icon="✅")
         elif auto_dead_chip > 0:
+            final_dead_chip = auto_dead_chip
             st.toast(f"🤖 死籌碼引擎：成功由 [{chip_engine}] 抓取到 {auto_dead_chip}%", icon="🎯")
         else:
             st.toast("⚠️ 死籌碼引擎全滅，請手動輸入", icon="❌")
@@ -648,8 +655,8 @@ if run_btn:
         # 📌 產生淨化版 C-Value (不含家數差)
         df_share_dynamic = process_tdcc_dynamic(df_share_wide, df_price, dead_chip_input, auto_dead_chip, money_input, influence_input)
         
-        # 📌 啟動 V12.0 專家診斷雷達 
-        df_v12_radar = process_v12_ultimate_radar(df_share_wide)
+        # 📌 啟動 V13.0 專家診斷雷達 (帶入 final_dead_chip 計算活籌碼槓桿)
+        df_v13_radar = process_v13_ultimate_radar(df_share_wide, final_dead_chip)
         
         df_twse = scrape_twse_block(actual_dates[0])
         df_margin = process_margin(fetch_fm("TaiwanStockMarginPurchaseShortSale", d_60))
@@ -685,14 +692,14 @@ if run_btn:
         df_cbas = process_cbas(df_cbas_raw[df_cbas_raw['cb_id'].astype(str).str.startswith(stock_id)]) if not df_cbas_raw.empty else pd.DataFrame()
         df_opt_inst = process_opt_inst(fetch_fm("TaiwanOptionInstitutionalInvestors", d_60, specific_id=False, target_id="TXO"))
 
-        st.success("✅ V12.0 引擎運算完畢！全面啟動比例化降維防雷掃描。")
+        st.success("✅ V13.0 引擎運算完畢！活籌碼槓桿倍數已套用至專家診斷。")
         def show(title, df):
             st.markdown(f"#### {title}")
             if df is None or df.empty: st.warning("此區塊查無數據或無發行紀錄")
             else: st.markdown(df.to_html(index=False, border=1), unsafe_allow_html=True)
             
         show("▼▼▼ 1-1. 雙軸活大戶鎖碼判定表 (C-Value) ▼▼▼", df_share_dynamic)
-        show("▼▼▼ 1-2. V12.0 專家診斷雷達 (比例化降維防雷版) ▼▼▼", df_v12_radar)
+        show("▼▼▼ 1-2. V13.0 專家診斷雷達 (活籌碼槓桿倍數版) ▼▼▼", df_v13_radar)
         show("▼▼▼ 2-1. 集保分級 - 張數表 (近10週) ▼▼▼", df_share_unit)
         show("▼▼▼ 2-2. 集保分級 - 人數表 (近10週) ▼▼▼", df_share_people)
         show("▼▼▼ 2-3. 集保分級 - 比例表 (%) ▼▼▼", df_share_pct)
@@ -724,9 +731,9 @@ if run_btn:
         show("▼▼▼ 23. 買賣家數差明細 (近15日) [來源：系統自算] ▼▼▼", df_branch_diff)
 
         st.divider(); st.subheader("📋 【給 Gemini 的量化分析資料包】")
-        p = f"請幫我分析 {stock_id} 的量化籌碼。已套用 V12.0 專家雷達，大戶門檻已雙軸精算。\n\n"
+        p = f"請幫我分析 {stock_id} 的量化籌碼。已套用 V13.0 專家雷達，大戶門檻與活籌碼槓桿已雙軸精算。\n\n"
         p += format_to_gas(df_share_dynamic, "1-1. 雙軸活大戶鎖碼判定表 (C-Value)")
-        p += format_to_gas(df_v12_radar, "1-2. V12.0 專家診斷雷達 (比例化降維防雷版)")
+        p += format_to_gas(df_v13_radar, "1-2. V13.0 專家診斷雷達 (活籌碼槓桿倍數版)")
         p += format_to_gas(df_share_unit, "2-1. 集保分級 - 張數表")
         p += format_to_gas(df_share_people, "2-2. 集保分級 - 人數表")
         p += format_to_gas(df_share_pct, "2-3. 集保分級 - 比例表 (%)")
