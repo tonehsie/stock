@@ -14,7 +14,7 @@ st.set_page_config(page_title="台股全息量化系統 (雙軸大戶鎖碼版)"
 FINMIND_TOKEN = "eyJ0eXAiOiJKV1QiLCJhbGciOiJIUzI1NiJ9.eyJkYXRlIjoiMjAyNi0wNC0xMCAyMDoyMDo0NiIsInVzZXJfaWQiOiJUb25lMSIsImVtYWlsIjoidG9uZWhzaWVAZ21haWwuY29tIiwiaXAiOiI2MS42Mi43LjE5OCJ9.7s3-IrkfdiUyTvGiZQGESBUBAPHQTnd4pwYcn8_J-CY"
 
 st.title("🤖 交易員實戰手冊：全息量化擷取系統")
-st.markdown("✅ **浮點數精算校正 (V36)** | ✅ **雙軸大戶 C-Value 引擎** | ✅ **全面防呆與多線程**")
+st.markdown("✅ **集保四維拆解(張數/人數/比例/均張)** | ✅ **雙軸大戶 C-Value 引擎** | ✅ **全面防呆與多線程**")
 
 # UI 輸入區 (加入自訂雙軸參數)
 col1, col2, col3, col4, col5 = st.columns([1, 1, 1, 1, 1])
@@ -210,13 +210,11 @@ def process_branch_data(df_raw, period_days, actual_dates):
     return out
 
 # ==========================================
-# 核心大戶加總邏輯優化 
+# 核心大戶加總邏輯優化 (V37 四維拆解版)
 # ==========================================
 def clean_level_by_math(x):
-    """📌 暴力數學解析器"""
     s = str(x).replace(',', '').replace(' ', '')
     if s in ["17", "17.0", "合計", "總計"]: return "合計"
-    
     nums = re.findall(r'\d+', s)
     if not nums: return s
     
@@ -225,7 +223,6 @@ def clean_level_by_math(x):
         return mapping.get(int(nums[0]), s)
         
     upper_bound = int(nums[-1])
-    
     if upper_bound <= 999: return "1-999股"
     elif upper_bound <= 5000: return "1-5張"
     elif upper_bound <= 10000: return "5-10張"
@@ -243,7 +240,8 @@ def clean_level_by_math(x):
     else: return "1000張以上"
 
 def process_tdcc(df):
-    if df.empty: return pd.DataFrame()
+    """將集保資料拆分為寬表(供引擎計算)與四張獨立子表(供顯示)"""
+    if df.empty: return pd.DataFrame(), pd.DataFrame(), pd.DataFrame(), pd.DataFrame(), pd.DataFrame()
     df = df[~df['HoldingSharesLevel'].astype(str).str.contains('差異數')]
     df['LevelClean'] = df['HoldingSharesLevel'].apply(clean_level_by_math)
     
@@ -254,21 +252,49 @@ def process_tdcc(df):
     dates = sorted(df['date'].unique(), reverse=True)[:5]
     df = df[df['date'].isin(dates)]
     df_levels = df[~df['LevelClean'].str.contains('合計|總計')]
-    df_total = df_levels.groupby('date')[['people', 'unit']].sum().reset_index().rename(columns={'people': '總人數(人)', 'unit': '總張數'})
-    df_pivot = df_levels.pivot(index='date', columns='LevelClean', values=['people', 'unit', 'percent']).reset_index()
     
+    # 總計計算
+    df_total = df_levels.groupby('date')[['people', 'unit']].sum().reset_index().rename(columns={'people': '總人數(人)', 'unit': '總張數'})
+    df_total['總均張'] = df_total.apply(lambda row: round(row['總張數'] / row['總人數(人)'], 2) if row['總人數(人)'] > 0 else 0, axis=1)
+    
+    # 1. 產生供底層 C-Value 使用的大寬表
+    df_pivot = df_levels.pivot(index='date', columns='LevelClean', values=['people', 'unit', 'percent']).reset_index()
     new_cols = ['date']
     for c in df_pivot.columns[1:]:
         m_name = {'people': '人數', 'unit': '張數', 'percent': '比例(%)'}.get(c[0], c[0])
         new_cols.append(f"{c[1]}_{m_name}")
-    df_pivot.columns = new_cols
-    df_out = pd.merge(df_total, df_pivot, on='date', how='left').rename(columns={'date': '日期'}).sort_values('日期', ascending=False)
-    return df_out
+    df_wide = df_pivot.copy()
+    df_wide.columns = new_cols
+    df_wide = pd.merge(df_total[['date', '總人數(人)', '總張數']], df_wide, on='date', how='left').rename(columns={'date': '日期'}).sort_values('日期', ascending=False)
+    
+    # 2. 拆分出四張獨立子表 (張數、人數、比例、均張)
+    level_order = ['1-999股', '1-5張', '5-10張', '10-15張', '15-20張', '20-30張', '30-40張', '40-50張', '50-100張', '100-200張', '200-400張', '400-600張', '600-800張', '800-1000張', '1000張以上']
+    
+    def make_table(metric, total_col=None):
+        pivot = df_levels.pivot(index='date', columns='LevelClean', values=metric).reset_index()
+        cols = ['date'] + [c for c in level_order if c in pivot.columns]
+        res = pivot[cols].copy()
+        if total_col:
+            res = pd.merge(df_total[['date', total_col]], res, on='date', how='right')
+        return res.rename(columns={'date': '日期'}).sort_values('日期', ascending=False)
+
+    df_unit = make_table('unit', '總張數')
+    df_people = make_table('people', '總人數(人)')
+    df_percent = make_table('percent', None)
+    
+    df_avg_base = df_levels.copy()
+    df_avg_base['avg'] = df_avg_base.apply(lambda row: round(row['unit'] / row['people'], 2) if row['people'] > 0 else 0, axis=1)
+    pivot_avg = df_avg_base.pivot(index='date', columns='LevelClean', values='avg').reset_index()
+    cols_avg = ['date'] + [c for c in level_order if c in pivot_avg.columns]
+    df_avg = pivot_avg[cols_avg].copy()
+    df_avg = pd.merge(df_total[['date', '總均張']], df_avg, on='date', how='right').rename(columns={'date': '日期'}).sort_values('日期', ascending=False)
+
+    return df_wide, df_unit, df_people, df_percent, df_avg
 
 def process_tdcc_dynamic(df_share, df_price, dead_chip_str, base_money_str, influence_pct_str):
+    """C-Value 實戰引擎 (使用 df_wide)"""
     if df_share.empty or df_price.empty: return pd.DataFrame()
     
-    # 📌 修正浮點數陷阱，允許輸入 "57%" 並精準轉換
     try: dead_chip_pct = float(str(dead_chip_str).replace('%', '').strip()) if dead_chip_str else 0.0
     except: dead_chip_pct = 0.0
     try: base_money_wan = float(str(base_money_str).replace(',', '').strip()) if base_money_str else 5000.0
@@ -289,7 +315,6 @@ def process_tdcc_dynamic(df_share, df_price, dead_chip_str, base_money_str, infl
             total_units = row.get('總張數', 0)
             
         cap_b = total_units / 10000 
-        
         money_threshold = (base_money_wan * 10000) / (p * 1000)
         influence_threshold = total_units * influence_rate
         raw_t = max(money_threshold, influence_threshold)
@@ -316,7 +341,6 @@ def process_tdcc_dynamic(df_share, df_price, dead_chip_str, base_money_str, infl
                 try: large_pct += float(val)
                 except: pass
         
-        # 📌 C-Value 精準浮點數計算 (直接使用 100.0 基數，避免小數點溢位)
         if dead_chip_pct > 0 and dead_chip_pct < 100:
             active_pool = 100.0 - dead_chip_pct
             c_val = (large_pct - dead_chip_pct) / active_pool
@@ -438,7 +462,7 @@ def process_cbas(df):
 # 執行主引擎
 # ==========================================
 if run_btn:
-    with st.spinner(f"正在擷取 {stock_id} 數據，並計算雙軸活大戶 C-Value..."):
+    with st.spinner(f"正在擷取 {stock_id} 數據，並進行集保四維拆解..."):
         start_probe = (datetime.date.today() - datetime.timedelta(days=1095)).strftime("%Y-%m-%d")
         df_price_raw = fetch_fm("TaiwanStockPrice", start_probe)
         if df_price_raw.empty: st.error("查無股價資料"); st.stop()
@@ -446,11 +470,14 @@ if run_btn:
         actual_dates = sorted(df_price_raw['date'].unique().tolist(), reverse=True)
         d_60 = actual_dates[59] if len(actual_dates) >= 60 else actual_dates[-1]
         
+        # 📌 取得拆分後的 5 張表
         df_share_raw = fetch_fm("TaiwanStockHoldingSharesPer", d_60)
-        df_share_expanded = process_tdcc(df_share_raw)
+        df_share_wide, df_share_unit, df_share_people, df_share_pct, df_share_avg = process_tdcc(df_share_raw)
+        
         df_price = process_price(df_price_raw)
         
-        df_share_dynamic = process_tdcc_dynamic(df_share_expanded, df_price, dead_chip_input, money_input, influence_input)
+        # C-Value 引擎使用原本的寬表進行計算
+        df_share_dynamic = process_tdcc_dynamic(df_share_wide, df_price, dead_chip_input, money_input, influence_input)
         
         df_twse = scrape_twse_block(actual_dates[0])
         df_margin = process_margin(fetch_fm("TaiwanStockMarginPurchaseShortSale", d_60))
@@ -490,14 +517,20 @@ if run_btn:
         
         df_opt_inst = process_opt_inst(fetch_fm("TaiwanOptionInstitutionalInvestors", d_60, specific_id=False, target_id="TXO"))
 
-        st.success("✅ V36 浮點數精算完畢！C-Value 與 23 項資料包已完美掛載。")
+        st.success("✅ V37 引擎運算完畢！集保表已成功拆解為張數、人數、比例、均張四大維度。")
         def show(title, df):
             st.markdown(f"#### {title}")
             if df is None or df.empty: st.warning("此區塊查無數據或無發行紀錄")
             else: st.markdown(df.to_html(index=False, border=1), unsafe_allow_html=True)
             
         show("▼▼▼ 1. 雙軸活大戶鎖碼判定表 (C-Value) ▼▼▼", df_share_dynamic)
-        show("▼▼▼ 2. 詳細集保分級展開明細 [來源：FinMind] ▼▼▼", df_share_expanded)
+        
+        # 📌 介面上顯示拆解後的 4 張集保表
+        show("▼▼▼ 2-1. 集保分級 - 張數表 ▼▼▼", df_share_unit)
+        show("▼▼▼ 2-2. 集保分級 - 人數表 ▼▼▼", df_share_people)
+        show("▼▼▼ 2-3. 集保分級 - 比例表 (%) ▼▼▼", df_share_pct)
+        show("▼▼▼ 2-4. 集保分級 - 均張表 ▼▼▼", df_share_avg)
+        
         show("▼▼▼ 3. 鉅額交易明細 [來源：證交所] ▼▼▼", df_twse)
         show("▼▼▼ 4. 散戶資券餘額 [來源：FinMind] ▼▼▼", df_margin)
         show("▼▼▼ 5. 法人買賣超 [來源：FinMind] ▼▼▼", df_inst)
@@ -532,7 +565,13 @@ if run_btn:
         st.divider(); st.subheader("📋 【給 Gemini 的量化分析資料包】")
         p = f"請幫我分析 {stock_id} 的量化籌碼。大戶門檻已根據「財力與影響力」雙軸精算，並以 C-Value 過濾死籌碼。\n\n"
         p += format_to_gas(df_share_dynamic, "1. 雙軸活大戶鎖碼判定表 (C-Value)")
-        p += format_to_gas(df_share_expanded, "2. 集保詳細分級")
+        
+        # 📌 餵給 AI 的資料包同樣拆解為 4 張表
+        p += format_to_gas(df_share_unit, "2-1. 集保分級 - 張數表")
+        p += format_to_gas(df_share_people, "2-2. 集保分級 - 人數表")
+        p += format_to_gas(df_share_pct, "2-3. 集保分級 - 比例表 (%)")
+        p += format_to_gas(df_share_avg, "2-4. 集保分級 - 均張表")
+        
         p += format_to_gas(df_twse, "3. 鉅額交易明細")
         p += format_to_gas(df_margin, "4. 散戶資券餘額")
         p += format_to_gas(df_inst, "5. 法人買賣超")
