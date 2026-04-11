@@ -68,32 +68,36 @@ def format_pledge_to_gas(df_summary, df_detail):
     return format_to_gas(df_summary, "9. 董監大股東質設 (餘額與斷頭預警)") + format_to_gas(df_detail, "董監大股東質設 (異動明細)")
 
 def scrape_director_holding(target_id):
+    """📌 強化版死籌碼爬蟲：多重備援架構"""
     headers = {"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36"}
     
+    # 優先權 1：Yahoo 財經 (反應最快，數據已加總)
     try:
-        url1 = f"https://ws.cnyes.com/web/api/v1/page/normal/stock/TWS/{target_id}/profile"
-        res1 = requests.get(url1, headers=headers, timeout=5).json()
-        val = float(res1['data']['profile']['directorHoldPercent'])
-        if val > 0: return val
-    except: pass
-
-    try:
-        url2 = f"https://fubon-ebrokerdj.fbs.com.tw/z/zc/zca/zca_{target_id}.djhtm"
-        res2 = requests.get(url2, headers=headers, timeout=5)
-        res2.encoding = 'big5'
-        clean_text2 = re.sub(r'<[^>]+>', '', res2.text)
-        match2 = re.search(r'董監持股.*?(\d+\.\d+)[%％]?', clean_text2)
-        if match2: 
-            val = float(match2.group(1))
+        url_yahoo = f"https://tw.stock.yahoo.com/quote/{target_id}/profile"
+        res = requests.get(url_yahoo, headers=headers, timeout=5)
+        match = re.search(r'"(?:boardD|d)irectorHoldingRatio"\s*:\s*([\d\.]+)', res.text)
+        if match: 
+            val = float(match.group(1))
             if val > 0 and val != 100.0: return val
     except: pass
-    
+
+    # 優先權 2：鉅亨網 (備援 API)
     try:
-        url3 = f"https://tw.stock.yahoo.com/quote/{target_id}/profile"
-        res3 = requests.get(url3, headers=headers, timeout=5)
-        match3 = re.search(r'"(?:boardD|d)irectorHoldingRatio"\s*:\s*([\d\.]+)', res3.text)
-        if match3: 
-            val = float(match3.group(1))
+        url_cnyes = f"https://ws.cnyes.com/web/api/v1/page/normal/stock/TWS/{target_id}/profile"
+        res = requests.get(url_cnyes, headers=headers, timeout=5).json()
+        val = float(res['data']['profile']['directorHoldPercent'])
+        if val > 0 and val != 100.0: return val
+    except: pass
+    
+    # 優先權 3：富邦證券 zca 基本資料 (傳統網頁解析)
+    try:
+        url_fubon_zca = f"https://fubon-ebrokerdj.fbs.com.tw/z/zc/zca/zca_{target_id}.djhtm"
+        res = requests.get(url_fubon_zca, headers=headers, timeout=5)
+        res.encoding = 'big5'
+        clean_text = re.sub(r'<[^>]+>', '', res.text)
+        match = re.search(r'董監持股.*?(\d+\.\d+)[%％]?', clean_text)
+        if match: 
+            val = float(match.group(1))
             if val > 0 and val != 100.0: return val
     except: pass
     
@@ -657,7 +661,7 @@ if run_btn:
         df_cbas = process_cbas(df_cbas_raw[df_cbas_raw['cb_id'].astype(str).str.startswith(stock_id)]) if not df_cbas_raw.empty else pd.DataFrame()
         df_opt_inst = process_opt_inst(fetch_fm("TaiwanOptionInstitutionalInvestors", d_60, specific_id=False, target_id="TXO"))
 
-        st.success("✅ V51 引擎運算完畢！死籌碼三引擎已成功破甲，模組淨化分離完成。")
+        st.success("✅ V10.0 引擎運算完畢！死籌碼三引擎已成功破甲，模組淨化分離完成。")
         def show(title, df):
             st.markdown(f"#### {title}")
             if df is None or df.empty: st.warning("此區塊查無數據或無發行紀錄")
