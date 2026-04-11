@@ -23,7 +23,7 @@ table.dataframe th { text-align: center !important; }
 """, unsafe_allow_html=True)
 
 st.title("🤖 交易員實戰手冊：全息量化擷取系統")
-st.markdown("✅ **V10.0 去偽存真雷達** | ✅ **三引擎軍用級爬蟲** | ✅ **10週集保解析**")
+st.markdown("✅ **V10.0 終極劇本雷達** | ✅ **集保與家數差淨化分離** | ✅ **三引擎防呆爬蟲**")
 
 # UI 輸入區
 col1, col2, col3, col4 = st.columns([1, 1, 1, 1])
@@ -42,7 +42,7 @@ run_btn = st.button("🚀 啟動引擎：擷取全息資料並產生 Prompt", us
 st.divider()
 
 # ==========================================
-# 工具函式與三引擎爬蟲 (絕對不漏接死籌碼)
+# 工具函式與三引擎爬蟲 
 # ==========================================
 def fetch_fm(dataset, start_date, end_date=None, specific_id=True, target_id=None):
     url = "https://api.finmindtrade.com/api/v4/data"
@@ -68,10 +68,8 @@ def format_pledge_to_gas(df_summary, df_detail):
     return format_to_gas(df_summary, "9. 董監大股東質設 (餘額與斷頭預警)") + format_to_gas(df_detail, "董監大股東質設 (異動明細)")
 
 def scrape_director_holding(target_id):
-    """📌 三引擎軍用級爬蟲：鉅亨網內網 -> 富邦MoneyDJ -> Yahoo穿甲彈"""
     headers = {"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36"}
     
-    # 引擎 1: 鉅亨網 API (最穩 JSON)
     try:
         url1 = f"https://ws.cnyes.com/web/api/v1/page/normal/stock/TWS/{target_id}/profile"
         res1 = requests.get(url1, headers=headers, timeout=5).json()
@@ -79,7 +77,6 @@ def scrape_director_holding(target_id):
         if val > 0: return val
     except: pass
 
-    # 引擎 2: 富邦 MoneyDJ (傳統靜態網頁最抗擋)
     try:
         url2 = f"https://fubon-ebrokerdj.fbs.com.tw/z/zc/zca/zca_{target_id}.djhtm"
         res2 = requests.get(url2, headers=headers, timeout=5)
@@ -91,7 +88,6 @@ def scrape_director_holding(target_id):
             if val > 0 and val != 100.0: return val
     except: pass
     
-    # 引擎 3: Yahoo JSON 穿甲
     try:
         url3 = f"https://tw.stock.yahoo.com/quote/{target_id}/profile"
         res3 = requests.get(url3, headers=headers, timeout=5)
@@ -247,6 +243,7 @@ def scrape_fubon_pledge(df_price_raw):
         if summary_map[name]["p"] == "-" and r['設質(張)'] > 0:
             summary_map[name]["p"] = r['設質日收盤價']; summary_map[name]["mc"] = r['強制賣出價(0.78)']
     summary_rows = [{"身份別": d["title"], "姓名": n, "目前剩餘質設(張)": d["balance"], "最後設質收盤價(元)": d["p"], "估算斷頭價(0.78)": d["mc"]} for n, d in summary_map.items() if d["balance"] > 0]
+    
     df_sum_out = pd.DataFrame(summary_rows)
     if not df_sum_out.empty: df_sum_out.columns = list(df_sum_out.columns)
     if not df_all.empty: df_all.columns = list(df_all.columns)
@@ -268,7 +265,7 @@ def scrape_twse_block(latest_date):
     except: return pd.DataFrame()
 
 # ==========================================
-# 集保處理引擎 (擴增為 10 週)
+# 集保處理引擎 (橫向加總)
 # ==========================================
 def clean_level_by_math(x):
     s = str(x).replace(',', '').replace(' ', '')
@@ -303,7 +300,6 @@ def process_tdcc(df):
     df['percent'] = pd.to_numeric(df['percent'], errors='coerce').fillna(0)
     df['unit'] = (pd.to_numeric(df.get('unit', 0), errors='coerce').fillna(0) / 1000).round().astype(int)
     
-    # 📌 擴充為抓取 10 週的集保資料
     dates = sorted(df['date'].unique(), reverse=True)[:10]
     df = df[df['date'].isin(dates)]
     df_levels = df[~df['LevelClean'].str.contains('合計|總計')]
@@ -345,7 +341,8 @@ def process_tdcc(df):
     
     return df_wide, df_unit, df_people, df_percent, df_avg
 
-def process_tdcc_dynamic(df_share, df_price, dead_chip_str, auto_dead_chip, base_money_str, influence_pct_str, df_branch_diff):
+def process_tdcc_dynamic(df_share, df_price, dead_chip_str, auto_dead_chip, base_money_str, influence_pct_str):
+    """📌 淨化版：移除買賣家數差輸入，回歸純粹的股權 C-Value"""
     if df_share.empty or df_price.empty: return pd.DataFrame()
     
     is_auto_chip = False
@@ -366,8 +363,6 @@ def process_tdcc_dynamic(df_share, df_price, dead_chip_str, auto_dead_chip, base
     df_s['dt'] = pd.to_datetime(df_s['日期'])
     df_p['dt'] = pd.to_datetime(df_p['日期'])
     df_m = pd.merge_asof(df_s.sort_values('dt'), df_p.sort_values('dt')[['dt', '收盤價(元)']], on='dt', direction='backward').sort_values('dt', ascending=False)
-    
-    diff_dict = dict(zip(df_branch_diff['日期'], df_branch_diff['買賣家數差'])) if not df_branch_diff.empty else {}
     
     out = []
     for _, row in df_m.iterrows():
@@ -391,7 +386,6 @@ def process_tdcc_dynamic(df_share, df_price, dead_chip_str, auto_dead_chip, base
         l_pct = sum([pd.to_numeric(row.get(c, 0), errors='coerce') for c in l_cols])
         
         c_display, status = "-", "未輸入死籌碼"
-        c_val = 0.0
         if 0 < dead_chip_pct < 100:
             active_pool = 100.0 - dead_chip_pct
             c_val = (l_pct - dead_chip_pct) / active_pool
@@ -407,8 +401,6 @@ def process_tdcc_dynamic(df_share, df_price, dead_chip_str, auto_dead_chip, base
             "精算門檻(張)": ceiling_t, "級距總佔比(%)": round(l_pct, 2),
             "死籌碼(%)": chip_label,
             "活大戶影響力C(%)": c_display,
-            "Raw_C_Value": c_val,
-            "買賣家數差": diff_dict.get(d_str, "-"),
             "實戰判定": status
         })
     out_df = pd.DataFrame(out)
@@ -416,9 +408,10 @@ def process_tdcc_dynamic(df_share, df_price, dead_chip_str, auto_dead_chip, base
     return out_df
 
 # ==========================================
-# 📌 全新子引擎：1-2. V10.0 上帝視角綜合診斷雷達 
+# 📌 1-2. V10.0 上帝視角綜合診斷雷達 
 # ==========================================
-def process_v10_ultimate_radar(df_wide, df_price, df_dynamic, df_branch_diff):
+def process_v10_ultimate_radar(df_wide, df_price):
+    """📌 淨化版：回歸純粹的股權結構診斷，移除家數差"""
     if df_wide.empty or len(df_wide) < 2: return pd.DataFrame()
     
     df = df_wide.sort_values('日期', ascending=True).copy()
@@ -428,7 +421,7 @@ def process_v10_ultimate_radar(df_wide, df_price, df_dynamic, df_branch_diff):
     df['中實戶人數'] = df['200-400張_人數'] + df['400-600張_人數']
     df['中實戶總數'] = df['200-400張_張數'] + df['400-600張_張數']
     
-    # 📌 V10 核心區間與散戶挪移定義
+    # V10 核心區間與散戶挪移定義
     df['核心區張數'] = df['400-600張_張數'] + df['600-800張_張數'] + df['800-1000張_張數'] + df['1000張以上_張數']
     df['核心區佔比(%)'] = df['400-600張_比例(%)'] + df['600-800張_比例(%)'] + df['800-1000張_比例(%)'] + df['1000張以上_比例(%)']
     df['1_10張人數'] = df['1-999股_人數'] + df['1-5張_人數'] + df['5-10張_人數']
@@ -438,20 +431,18 @@ def process_v10_ultimate_radar(df_wide, df_price, df_dynamic, df_branch_diff):
     df['1000張變動(%)'] = df['1000張以上佔比(%)'].diff().round(2)
     df['中實戶人數變動'] = df['中實戶人數'].diff()
     df['中實戶張數變動'] = df['中實戶總數'].diff()
-    df['核心區變動(張)'] = df['核心區張數'].diff()
+    df['核心區變動(%)'] = df['核心區佔比(%)'].diff().round(2)
     df['1_10張人數變動'] = df['1_10張人數'].diff()
     df['10_50張人數變動'] = df['10_50張人數'].diff()
     
     df['CV_集中速度(%)'] = np.where(df['1000張以上佔比(%)'].shift(1) > 0, (df['1000張變動(%)'] / df['1000張以上佔比(%)'].shift(1) * 100).round(2), 0.0)
     df['規律係數(K值)'] = np.where(df['中實戶人數變動'] > 0, (df['中實戶張數變動'] / df['中實戶人數變動']).round(1), 0.0)
     
-    # 處理股價週漲跌與週五權重
     df['dt_end'] = pd.to_datetime(df['日期'])
     df['dt_start'] = df['dt_end'] - pd.Timedelta(days=6)
     df_p = df_price.copy()
     df_p['dt'] = pd.to_datetime(df_p['日期'])
     
-    diff_dict = dict(zip(df_branch_diff['日期'], df_branch_diff['買賣家數差'])) if not df_branch_diff.empty else {}
     fvw_list, price_change_list = [], []
     
     for idx, row in df.iterrows():
@@ -464,7 +455,6 @@ def process_v10_ultimate_radar(df_wide, df_price, df_dynamic, df_branch_diff):
         fvw = round(friday_vol / weekly_vol, 2) if weekly_vol > 0 else 0.0
         fvw_list.append(fvw)
         
-        # 週漲跌幅計算
         if len(week_df) >= 1:
             close_end = week_df.iloc[-1]['收盤價(元)']
             prev_df = df_p[df_p['dt'] < d_start].sort_values('dt')
@@ -477,51 +467,34 @@ def process_v10_ultimate_radar(df_wide, df_price, df_dynamic, df_branch_diff):
         
     df['FVW_週五權重'] = fvw_list
     df['週漲跌(%)'] = price_change_list
-    df['買賣家數差'] = df['日期'].map(diff_dict).fillna("-")
     
-    # 📌 V10.0 上帝視角專家診斷
     def generate_expert_advice_v10(row):
         if pd.isna(row['總人數變動']): return "⚪ 基準建立中"
         advice = []
         
-        # 1. 偵測流動性枯竭
         if row['核心區佔比(%)'] > 85.0:
             advice.append("⚠️ [流動性枯竭] 核心大戶佔比極高，慎防流動性反噬")
-            
-        # 2. 偵測質押/信託陷阱 (價量背離)
-        if row['1000張變動(%)'] > 2.0 and row['週漲跌(%)'] < 1.0:
-            advice.append("⚠️ [虛假集中] 疑似大股東質押或信託撥轉，無實質買盤")
-            
-        # 3. 偵測對倒假象 (大戶增但家數差正)
-        try:
-            if row['1000張變動(%)'] > 0 and float(row['買賣家數差']) > 0:
-                advice.append("⚠️ [對倒假象] 大戶增但家數差為正，籌碼實為分散")
-        except: pass
-        
-        # 4. 偵測級距挪移 (拆單留存)
-        if row['核心區變動(張)'] > 0 and row['1000張變動(%)'] < 0:
-            advice.append("🟡 [級距挪移] 頂層大戶微拆單，籌碼仍留存核心區")
-            
-        # 5. 偵測螞蟻搬家
+        if row['1000張變動(%)'] > 2.0 and row['CV_集中速度(%)'] > 5.0:
+            advice.append("⚠️ [異常集中] 提防大股東質押或內部撥轉，無實質買盤")
+        if row['核心區變動(%)'] >= 0 and row['1000張變動(%)'] < -0.5:
+            advice.append("🟡 [級距挪移] 1000張減少但核心區總合沒退，主力拆單隱藏中")
         if row['1_10張人數變動'] < 0 and row['10_50張人數變動'] > 0:
             advice.append("🟡 [螞蟻搬家] 小散戶升級，具備長線緩漲特徵")
-            
-        # 6. 偵測暴力洗盤完畢
-        if row['核心區變動(張)'] > 1000 and row['總人數變動'] < -200:
-            advice.append("🔴🔴 [暴力洗盤] 散戶集體斷頭，核心大戶全收，準備噴發")
-            
-        # 7. 傳統防呆與分身警示
+        if row['核心區變動(%)'] > 1.0 and row['總人數變動'] < -500:
+            advice.append("🔴🔴 [暴力洗盤] 散戶集體斷頭，核心大戶全收，噴發啟動訊號")
         if row['FVW_週五權重'] > 0.35 and row['1000張變動(%)'] > 0.5:
-            if "假象" not in "".join(advice) and "虛假" not in "".join(advice):
-                advice.append("【數據失真】週五爆量做帳，疑似隔日沖")
+            if "質押" not in "".join(advice) and "虛假" not in "".join(advice):
+                advice.append("【假鎖碼警報】週五爆量做帳，疑似隔日沖大戶混入")
         if row['中實戶人數變動'] >= 2 and 200 <= row['規律係數(K值)'] <= 600:
-            advice.append("【分身警示】偵測到合資集團化整為零")
+            advice.append("【分身警示】偵測到合資集團，K值極度規律，化整為零吃貨中")
+        if row['總人數變動'] > 800 and row['核心區變動(%)'] >= -0.1:
+            advice.append("🟣 [惡意甩轎] 散戶爆量湧入但主力沒退，刻意讓道洗盤")
 
         return " | ".join(advice) if advice else "🔵 趨勢觀察中"
 
     df['V10_診斷說明'] = df.apply(generate_expert_advice_v10, axis=1)
     
-    report_columns = ['日期', '總人數變動', '核心區變動(張)', '1000張變動(%)', '規律係數(K值)', '買賣家數差', '週漲跌(%)', 'V10_診斷說明']
+    report_columns = ['日期', '總人數變動', '核心區變動(%)', '1000張變動(%)', '規律係數(K值)', 'CV_集中速度(%)', 'FVW_週五權重', 'V10_診斷說明']
     final_report = df[report_columns].sort_values('日期', ascending=False).fillna(0).head(10)
     final_report.columns = list(final_report.columns)
     return final_report
@@ -644,12 +617,11 @@ if run_btn:
         df_share_raw = fetch_fm("TaiwanStockHoldingSharesPer", d_60)
         df_share_wide, df_share_unit, df_share_people, df_share_pct, df_share_avg = process_tdcc(df_share_raw)
         
-        df_share_dynamic = process_tdcc_dynamic(df_share_wide, df_price, dead_chip_input, auto_dead_chip, money_input, influence_input, df_branch_diff)
+        # 📌 產生淨化版 C-Value (不含家數差)
+        df_share_dynamic = process_tdcc_dynamic(df_share_wide, df_price, dead_chip_input, auto_dead_chip, money_input, influence_input)
         
-        # 📌 啟動 V10.0 終極雷達 (整合家數差、週漲跌、核心區拆單等進階濾網)
-        df_v10_radar = process_v10_ultimate_radar(df_share_wide, df_price, df_share_dynamic, df_branch_diff)
-        
-        if 'Raw_C_Value' in df_share_dynamic.columns: df_share_dynamic = df_share_dynamic.drop(columns=['Raw_C_Value'])
+        # 📌 啟動 V10.0 終極雷達 
+        df_v10_radar = process_v10_ultimate_radar(df_share_wide, df_price)
         
         df_twse = scrape_twse_block(actual_dates[0])
         df_margin = process_margin(fetch_fm("TaiwanStockMarginPurchaseShortSale", d_60))
@@ -685,14 +657,14 @@ if run_btn:
         df_cbas = process_cbas(df_cbas_raw[df_cbas_raw['cb_id'].astype(str).str.startswith(stock_id)]) if not df_cbas_raw.empty else pd.DataFrame()
         df_opt_inst = process_opt_inst(fetch_fm("TaiwanOptionInstitutionalInvestors", d_60, specific_id=False, target_id="TXO"))
 
-        st.success("✅ V50 引擎運算完畢！死籌碼三引擎已成功破甲，V10 雷達上線。")
+        st.success("✅ V51 引擎運算完畢！死籌碼三引擎已成功破甲，模組淨化分離完成。")
         def show(title, df):
             st.markdown(f"#### {title}")
             if df is None or df.empty: st.warning("此區塊查無數據或無發行紀錄")
             else: st.markdown(df.to_html(index=False, border=1), unsafe_allow_html=True)
             
         show("▼▼▼ 1-1. 雙軸活大戶鎖碼判定表 (C-Value) ▼▼▼", df_share_dynamic)
-        show("▼▼▼ 1-2. V10.0 上帝視角綜合診斷雷達 (含買賣家數差與核心挪移) ▼▼▼", df_v10_radar)
+        show("▼▼▼ 1-2. V10.0 上帝視角綜合診斷雷達 (含專家建議) ▼▼▼", df_v10_radar)
         show("▼▼▼ 2-1. 集保分級 - 張數表 (近10週) ▼▼▼", df_share_unit)
         show("▼▼▼ 2-2. 集保分級 - 人數表 (近10週) ▼▼▼", df_share_people)
         show("▼▼▼ 2-3. 集保分級 - 比例表 (%) ▼▼▼", df_share_pct)
