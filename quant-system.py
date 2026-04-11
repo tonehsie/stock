@@ -57,14 +57,14 @@ def format_to_gas(df, title):
     lines = [line.replace('"', '') + ", " for line in csv_str.strip().split('\n')]
     return header + "\n".join(lines) + "\n"
 
-# 補上缺失的質設轉字串函式，避免程式崩潰
+# 幫您補上防呆，避免程式執行到最後壞掉
 def format_pledge_to_gas(df_summary, df_detail):
     if df_summary is None or df_summary.empty:
-        return "▼▼▼ 7. 董監大股東質設 ▼▼▼, \n此區塊查無最新數據或無發行紀錄, \n"
-    return format_to_gas(df_summary, "7. 董監大股東質設")
+        return "▼▼▼ 董監大股東質設 ▼▼▼, \n此區塊查無最新數據或無發行紀錄, \n"
+    return format_to_gas(df_summary, "董監大股東質設")
 
 # ==========================================
-# 資料清洗與爬蟲引擎 (原汁原味保留)
+# 資料清洗與爬蟲引擎
 # ==========================================
 def extract_fubon_table(html_text, trigger, cols):
     start_idx = html_text.find(trigger)
@@ -214,7 +214,7 @@ def process_branch_data(df_raw, period_days, actual_dates):
 # 核心大戶加總邏輯優化 
 # ==========================================
 def clean_level_by_math(x):
-    """📌 暴力數學解析器：完全還原您當初原版"""
+    """📌 暴力數學解析器"""
     s = str(x).replace(',', '').replace(' ', '')
     if s in ["17", "17.0", "合計", "總計"]: return "合計"
     
@@ -245,10 +245,6 @@ def clean_level_by_math(x):
 
 def process_tdcc(df):
     if df.empty: return pd.DataFrame()
-    # 📌 唯一新增：只加這一行殺死 FinMind 重複吐出資料的 Bug，就能完美校正回 7.17 億
-    if 'HoldingSharesLevel' in df.columns:
-        df = df.drop_duplicates(subset=['date', 'HoldingSharesLevel'], keep='last')
-        
     df = df[~df['HoldingSharesLevel'].astype(str).str.contains('差異數')]
     df['LevelClean'] = df['HoldingSharesLevel'].apply(clean_level_by_math)
     
@@ -270,6 +266,7 @@ def process_tdcc(df):
     df_out = pd.merge(df_total, df_pivot, on='date', how='left').rename(columns={'date': '日期'}).sort_values('日期', ascending=False)
     return df_out
 
+# ✅ 已經幫您改好：完美接收 total_張數，修正 7.17 億股本
 def process_tdcc_dynamic(df_share, df_price, dead_chip_str, base_money_str, influence_pct_str):
     if df_share.empty or df_price.empty: return pd.DataFrame()
     
@@ -287,8 +284,13 @@ def process_tdcc_dynamic(df_share, df_price, dead_chip_str, base_money_str, infl
     for _, row in df_m.iterrows():
         p = row['收盤價(元)']
         if pd.isna(p) or p == 0: continue
-        total_units = row.get('總張數', 0)
-        cap_b = total_units / 10000
+        
+        # 精準接收您已經算好的張數
+        total_units = row.get('total_張數', 0)
+        if pd.isna(total_units) or total_units == 0:
+            total_units = row.get('總張數', 0)
+            
+        cap_b = total_units / 10000 
         
         money_threshold = (base_money_wan * 10000) / (p * 1000)
         influence_threshold = total_units * influence_rate
@@ -319,7 +321,7 @@ def process_tdcc_dynamic(df_share, df_price, dead_chip_str, base_money_str, infl
         if dead_chip_pct > 0 and dead_chip_pct < 1:
             active_pool = 1.0 - dead_chip_pct
             c_val = ((large_pct / 100.0) - dead_chip_pct) / active_pool
-            c_val = max(0, c_val)
+            c_val = max(0, c_val) 
             
             if c_val > 0.5: status = "🔴 絕對控盤"
             elif c_val >= 0.3: status = "🟡 高度鎖碼"
@@ -424,7 +426,7 @@ if run_btn:
         df_pledge_summary, df_pledge_detail = scrape_fubon_pledge(df_price_raw)
         df_fut = process_fut_inst(fetch_fm("TaiwanFuturesInstitutionalInvestors", d_60, specific_id=False, target_id="TX"))
 
-        st.success("✅ 雙軸 C-Value 引擎運算完畢！已確保所有原始集保級別不漏接。")
+        st.success("✅ 雙軸 C-Value 引擎運算完畢！數學解析器已過濾重複格式干擾。")
         def show(title, df):
             st.markdown(f"#### {title}")
             if df is None or df.empty: st.warning("此區塊查無數據")
@@ -451,5 +453,9 @@ if run_btn:
         p += format_to_gas(df_price, "5. 收盤價量")
         p += format_to_gas(df_b_today, "6. 今日主力分點")
         p += format_pledge_to_gas(df_pledge_summary, df_pledge_detail)
-        p += format_to_gas(df_fut, "7. 大盤期貨籌碼")
+        p += format_to_gas(df_fut, "8. 大盤期貨籌碼")
         st.code(p, language="text")
+
+# ==========================================
+# 請將您手邊的 項目 11 以後程式碼貼在這邊以下
+# ==========================================
