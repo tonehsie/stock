@@ -9,7 +9,7 @@ import re
 import concurrent.futures
 
 # 設定網頁標題與佈局
-st.set_page_config(page_title="台股全息量化系統 (V10.3 終極破甲版)", layout="wide")
+st.set_page_config(page_title="台股全息量化系統 (V10.5 終極火力版)", layout="wide")
 
 # 內建最新 Sponsor Token
 FINMIND_TOKEN = "eyJ0eXAiOiJKV1QiLCJhbGciOiJIUzI1NiJ9.eyJkYXRlIjoiMjAyNi0wNC0xMCAyMDoyMDo0NiIsInVzZXJfaWQiOiJUb25lMSIsImVtYWlsIjoidG9uZWhzaWVAZ21haWwuY29tIiwiaXAiOiI2MS42Mi43LjE5OCJ9.7s3-IrkfdiUyTvGiZQGESBUBAPHQTnd4pwYcn8_J-CY"
@@ -23,14 +23,14 @@ table.dataframe th { text-align: center !important; }
 """, unsafe_allow_html=True)
 
 st.title("🤖 交易員實戰手冊：全息量化擷取系統")
-st.markdown("✅ **V10.3 終極劇本雷達** | ✅ **集保與家數差淨化分離** | ✅ **Goodinfo 精準死籌碼引擎**")
+st.markdown("✅ **V10.5 終極劇本雷達 (新增高檔逃命與主升段軋空)** | ✅ **集保與家數差淨化分離** | ✅ **五引擎火力全開 (含玩股網+偽裝Cookie)**")
 
 # UI 輸入區
 col1, col2, col3, col4 = st.columns([1, 1, 1, 1])
 with col1:
     stock_id = st.text_input("個股代號", value="7711")
 with col2:
-    dead_chip_input = st.text_input("死籌碼 %", placeholder="不填則 Goodinfo 自動抓")
+    dead_chip_input = st.text_input("死籌碼 %", placeholder="不填則五引擎自動抓")
 with col3:
     money_input = st.text_input("財力設定(萬)", value="5000")
 with col4:
@@ -42,7 +42,7 @@ run_btn = st.button("🚀 啟動引擎：擷取全息資料並產生 Prompt", us
 st.divider()
 
 # ==========================================
-# 工具函式與四引擎爬蟲 
+# 工具函式與五引擎爬蟲 
 # ==========================================
 def fetch_fm(dataset, start_date, end_date=None, specific_id=True, target_id=None):
     url = "https://api.finmindtrade.com/api/v4/data"
@@ -68,56 +68,61 @@ def format_pledge_to_gas(df_summary, df_detail):
     return format_to_gas(df_summary, "9. 董監大股東質設 (餘額與斷頭預警)") + format_to_gas(df_detail, "董監大股東質設 (異動明細)")
 
 def scrape_director_holding(target_id):
-    """📌 V10.3 終極版死籌碼爬蟲：優先解析 Goodinfo 歷史表格，避開法人重複計算"""
+    """📌 V10.4 五引擎死籌碼爬蟲 (玩股網優先 + Goodinfo 偽造 Cookie 突破)"""
     headers = {
         "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
         "Accept-Language": "zh-TW,zh;q=0.9,en-US;q=0.8,en;q=0.7",
     }
     
-    # 優先權 1：Goodinfo 董監持股明細表 (最準確)
+    # 引擎 1：玩股網 WantGoo (JSON API，不易被擋且對新股支援佳)
+    try:
+        url_wantgoo = f"https://www.wantgoo.com/stock/api/company/profile?StockNo={target_id}"
+        res = requests.get(url_wantgoo, headers=headers, timeout=5).json()
+        val = float(res.get('directorHoldRatio', 0))
+        if 0 < val < 100.0: return val, "玩股網"
+    except: pass
+
+    # 引擎 2：Goodinfo 台灣股市資訊網 (加入偽造 Cookie 突破 403 阻擋)
     try:
         url_good = f"https://goodinfo.tw/tw/StockDirectorSharehold.asp?STOCK_ID={target_id}"
         headers_good = headers.copy()
         headers_good["Referer"] = f"https://goodinfo.tw/tw/StockDetail.asp?STOCK_ID={target_id}"
+        headers_good["Cookie"] = "CLIENT_KEY=20260411;" # 偽造通行證
         res = requests.get(url_good, headers=headers_good, timeout=8)
         res.encoding = 'utf-8'
         
         dfs = pd.read_html(StringIO(res.text))
         for df in dfs:
             if isinstance(df.columns, pd.MultiIndex):
-                # 壓平多層表頭，並清理多餘字串
                 cols = ['_'.join(str(c) for c in col if 'Unnamed' not in str(c)).strip('_') for col in df.columns.values]
                 df.columns = cols
-            
-            # 尋找「全體董監持股_持股(%)」欄位
             target_col = [c for c in df.columns if '全體董監持股' in c and '持股(%)' in c.replace(' ', '')]
             if target_col:
-                # 往下找第一筆非 '-' 的有效數字 (避開當月尚未結算的空值)
                 for val in df[target_col[0]]:
-                    if str(val).strip() not in ['-', '']:
+                    if str(val).strip() not in ['-', '', 'nan']:
                         parsed_val = float(str(val).strip())
-                        if 0 < parsed_val < 100.0: return parsed_val
+                        if 0 < parsed_val < 100.0: return parsed_val, "Goodinfo"
     except: pass
 
-    # 優先權 2：Yahoo 財經 API
+    # 引擎 3：Yahoo 財經 API
     try:
         url_yahoo = f"https://tw.stock.yahoo.com/quote/{target_id}/profile"
         res = requests.get(url_yahoo, headers=headers, timeout=5)
         match = re.search(r'"(?:boardD|d)irectorHoldingRatio"\s*:\s*([\d\.]+)', res.text)
         if match: 
             val = float(match.group(1))
-            if 0 < val < 100.0: return val
+            if 0 < val < 100.0: return val, "Yahoo"
     except: pass
 
-    # 優先權 3：鉅亨網 後台 API
+    # 引擎 4：鉅亨網 後台 API
     try:
         url_cnyes = f"https://ws.cnyes.com/web/api/v1/page/normal/stock/TWS/{target_id}/profile"
         res = requests.get(url_cnyes, headers=headers, timeout=5).json()
         val = float(res['data']['profile']['directorHoldPercent'])
-        if 0 < val < 100.0: return val
+        if 0 < val < 100.0: return val, "鉅亨網"
     except: pass
     
-    # 優先權 4：富邦證券 (最後備援)
+    # 引擎 5：富邦證券 zca 基本資料 (傳統網頁解析)
     try:
         url_fubon = f"https://fubon-ebrokerdj.fbs.com.tw/z/zc/zca/zca_{target_id}.djhtm"
         res = requests.get(url_fubon, headers=headers, timeout=5)
@@ -126,10 +131,10 @@ def scrape_director_holding(target_id):
         match = re.search(r'董監持股.*?(\d+\.\d+)[%％]?', clean_text)
         if match: 
             val = float(match.group(1))
-            if 0 < val < 100.0: return val
+            if 0 < val < 100.0: return val, "富邦證券"
     except: pass
     
-    return 0.0
+    return 0.0, "失敗"
 
 # ==========================================
 # 資料處理引擎 (分點與家數差)
@@ -439,7 +444,7 @@ def process_tdcc_dynamic(df_share, df_price, dead_chip_str, auto_dead_chip, base
     return out_df
 
 # ==========================================
-# V10.0 上帝視角綜合診斷雷達 
+# 📌 V10.5 上帝視角綜合診斷雷達 (新增逃命警報與主升段判定)
 # ==========================================
 def process_v10_ultimate_radar(df_wide, df_price):
     if df_wide.empty or len(df_wide) < 2: return pd.DataFrame()
@@ -501,22 +506,40 @@ def process_v10_ultimate_radar(df_wide, df_price):
         if pd.isna(row['總人數變動']): return "⚪ 基準建立中"
         advice = []
         
+        # 📌 [新增] 逃命警報：高檔出貨判定
+        if row['總人數變動'] > 1500 and row['1000張變動(%)'] < -1.5:
+            advice.append("💀 [逃命警報] 散戶爆量接刀，大戶趁高檔瘋狂倒貨，請立即清倉離場！")
+            
         if row['核心區佔比(%)'] > 85.0:
             advice.append("⚠️ [流動性枯竭] 核心大戶佔比極高，慎防流動性反噬")
-        if row['1000張變動(%)'] > 2.0 and row['CV_集中速度(%)'] > 5.0:
-            advice.append("⚠️ [異常集中] 提防大股東質押或內部撥轉，無實質買盤")
+            
+        # 📌 [修正] 主升段軋空 vs 異常集中(質押)
+        if row['1000張變動(%)'] > 3.0:
+            if row['總人數變動'] < 0:
+                advice.append("🚀 [主升段軋空] 大戶暴力掃貨且散戶退場，真金白銀推升，切勿做空！")
+            else:
+                advice.append("⚠️ [異常集中] 提防大股東質押或內部撥轉，需確認股價是否有實質大漲。")
+                
+        elif row['1000張變動(%)'] > 2.0 and row['CV_集中速度(%)'] > 5.0:
+            advice.append("⚠️ [異常集中] 提防大股東質押，無實質買盤")
+
         if row['核心區變動(%)'] >= 0 and row['1000張變動(%)'] < -0.5:
             advice.append("🟡 [級距挪移] 1000張減少但核心區總合沒退，主力拆單隱藏中")
+            
         if row['1_10張人數變動'] < 0 and row['10_50張人數變動'] > 0:
             advice.append("🟡 [螞蟻搬家] 小散戶升級，具備長線緩漲特徵")
+            
         if row['核心區變動(%)'] > 1.0 and row['總人數變動'] < -500:
             advice.append("🔴🔴 [暴力洗盤] 散戶集體斷頭，核心大戶全收，噴發啟動訊號")
+            
         if row['FVW_週五權重'] > 0.35 and row['1000張變動(%)'] > 0.5:
-            if "質押" not in "".join(advice) and "虛假" not in "".join(advice):
+            if "質押" not in "".join(advice) and "虛假" not in "".join(advice) and "軋空" not in "".join(advice):
                 advice.append("【假鎖碼警報】週五爆量做帳，疑似隔日沖大戶混入")
+                
         if row['中實戶人數變動'] >= 2 and 200 <= row['規律係數(K值)'] <= 600:
             advice.append("【分身警示】偵測到合資集團，K值極度規律，化整為零吃貨中")
-        if row['總人數變動'] > 800 and row['核心區變動(%)'] >= -0.1:
+            
+        if row['總人數變動'] > 800 and row['核心區變動(%)'] >= -0.1 and "逃命警報" not in "".join(advice):
             advice.append("🟣 [惡意甩轎] 散戶爆量湧入但主力沒退，刻意讓道洗盤")
 
         return " | ".join(advice) if advice else "🔵 趨勢觀察中"
@@ -630,7 +653,7 @@ def process_cbas(df):
 # 執行主引擎
 # ==========================================
 if run_btn:
-    with st.spinner(f"正在擷取 {stock_id} 數據，並啟動 V10.3 上帝視角雷達..."):
+    with st.spinner(f"正在擷取 {stock_id} 數據，並啟動 V10.5 上帝視角雷達..."):
         start_probe = (datetime.date.today() - datetime.timedelta(days=1095)).strftime("%Y-%m-%d")
         df_p_raw = fetch_fm("TaiwanStockPrice", start_probe)
         if df_p_raw.empty: st.error("查無股價資料"); st.stop()
@@ -639,7 +662,14 @@ if run_btn:
         d_60 = actual_dates[59] if len(actual_dates) >= 60 else actual_dates[-1]
         df_price = process_price(df_p_raw)
         
-        auto_dead_chip = scrape_director_holding(stock_id)
+        auto_dead_chip, chip_engine = scrape_director_holding(stock_id)
+        if dead_chip_input and str(dead_chip_input).strip() != "":
+            st.toast("🤖 死籌碼：使用手動輸入數值", icon="✅")
+        elif auto_dead_chip > 0:
+            st.toast(f"🤖 死籌碼引擎：成功由 [{chip_engine}] 抓取到 {auto_dead_chip}%", icon="🎯")
+        else:
+            st.toast("⚠️ 死籌碼引擎全滅，請手動輸入", icon="❌")
+
         df_branch_raw = fetch_fm_branch_fast_parallel(actual_dates[:60])
         df_branch_diff = process_branch_diff(df_branch_raw, actual_dates)
         
@@ -649,7 +679,7 @@ if run_btn:
         # 📌 產生淨化版 C-Value (不含家數差)
         df_share_dynamic = process_tdcc_dynamic(df_share_wide, df_price, dead_chip_input, auto_dead_chip, money_input, influence_input)
         
-        # 📌 啟動 V10.0 終極雷達 
+        # 📌 啟動 V10.5 終極雷達 
         df_v10_radar = process_v10_ultimate_radar(df_share_wide, df_price)
         
         df_twse = scrape_twse_block(actual_dates[0])
@@ -686,14 +716,14 @@ if run_btn:
         df_cbas = process_cbas(df_cbas_raw[df_cbas_raw['cb_id'].astype(str).str.startswith(stock_id)]) if not df_cbas_raw.empty else pd.DataFrame()
         df_opt_inst = process_opt_inst(fetch_fm("TaiwanOptionInstitutionalInvestors", d_60, specific_id=False, target_id="TXO"))
 
-        st.success("✅ V10.3 引擎運算完畢！四引擎 (Goodinfo/Yahoo/鉅亨/富邦) 破甲完成。")
+        st.success("✅ V10.5 引擎運算完畢！新增逃命警報與真假軋空判定。")
         def show(title, df):
             st.markdown(f"#### {title}")
             if df is None or df.empty: st.warning("此區塊查無數據或無發行紀錄")
             else: st.markdown(df.to_html(index=False, border=1), unsafe_allow_html=True)
             
         show("▼▼▼ 1-1. 雙軸活大戶鎖碼判定表 (C-Value) ▼▼▼", df_share_dynamic)
-        show("▼▼▼ 1-2. V10.0 上帝視角綜合診斷雷達 (含專家建議) ▼▼▼", df_v10_radar)
+        show("▼▼▼ 1-2. V10.5 上帝視角綜合診斷雷達 (含專家建議) ▼▼▼", df_v10_radar)
         show("▼▼▼ 2-1. 集保分級 - 張數表 (近10週) ▼▼▼", df_share_unit)
         show("▼▼▼ 2-2. 集保分級 - 人數表 (近10週) ▼▼▼", df_share_people)
         show("▼▼▼ 2-3. 集保分級 - 比例表 (%) ▼▼▼", df_share_pct)
@@ -725,9 +755,9 @@ if run_btn:
         show("▼▼▼ 23. 買賣家數差明細 (近15日) [來源：系統自算] ▼▼▼", df_branch_diff)
 
         st.divider(); st.subheader("📋 【給 Gemini 的量化分析資料包】")
-        p = f"請幫我分析 {stock_id} 的量化籌碼。已套用 V10.3 波段雷達，大戶門檻已雙軸精算。\n\n"
+        p = f"請幫我分析 {stock_id} 的量化籌碼。已套用 V10.5 波段雷達，大戶門檻已雙軸精算。\n\n"
         p += format_to_gas(df_share_dynamic, "1-1. 雙軸活大戶鎖碼判定表 (C-Value)")
-        p += format_to_gas(df_v10_radar, "1-2. V10.0 上帝視角綜合診斷雷達 (含專家建議)")
+        p += format_to_gas(df_v10_radar, "1-2. V10.5 上帝視角綜合診斷雷達 (含專家建議)")
         p += format_to_gas(df_share_unit, "2-1. 集保分級 - 張數表")
         p += format_to_gas(df_share_people, "2-2. 集保分級 - 人數表")
         p += format_to_gas(df_share_pct, "2-3. 集保分級 - 比例表 (%)")
