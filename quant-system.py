@@ -14,7 +14,7 @@ st.set_page_config(page_title="台股全息量化系統 (雙軸大戶鎖碼版)"
 FINMIND_TOKEN = "eyJ0eXAiOiJKV1QiLCJhbGciOiJIUzI1NiJ9.eyJkYXRlIjoiMjAyNi0wNC0xMCAyMDoyMDo0NiIsInVzZXJfaWQiOiJUb25lMSIsImVtYWlsIjoidG9uZWhzaWVAZ21haWwuY29tIiwiaXAiOiI2MS42Mi43LjE5OCJ9.7s3-IrkfdiUyTvGiZQGESBUBAPHQTnd4pwYcn8_J-CY"
 
 st.title("🤖 交易員實戰手冊：全息量化擷取系統")
-st.markdown("✅ **數學暴力解析(絕對防騙)** | ✅ **雙軸大戶 C-Value 引擎** | ✅ **全面防呆與多線程**")
+st.markdown("✅ **浮點數精算校正 (V36)** | ✅ **雙軸大戶 C-Value 引擎** | ✅ **全面防呆與多線程**")
 
 # UI 輸入區 (加入自訂雙軸參數)
 col1, col2, col3, col4, col5 = st.columns([1, 1, 1, 1, 1])
@@ -265,15 +265,15 @@ def process_tdcc(df):
     df_out = pd.merge(df_total, df_pivot, on='date', how='left').rename(columns={'date': '日期'}).sort_values('日期', ascending=False)
     return df_out
 
-# ✅ 完美接收 total_張數，修正股本
 def process_tdcc_dynamic(df_share, df_price, dead_chip_str, base_money_str, influence_pct_str):
     if df_share.empty or df_price.empty: return pd.DataFrame()
     
-    try: dead_chip_pct = float(dead_chip_str) / 100.0 if dead_chip_str else 0.0
+    # 📌 修正浮點數陷阱，允許輸入 "57%" 並精準轉換
+    try: dead_chip_pct = float(str(dead_chip_str).replace('%', '').strip()) if dead_chip_str else 0.0
     except: dead_chip_pct = 0.0
-    try: base_money_wan = float(base_money_str) if base_money_str else 5000.0
+    try: base_money_wan = float(str(base_money_str).replace(',', '').strip()) if base_money_str else 5000.0
     except: base_money_wan = 5000.0
-    try: influence_rate = float(influence_pct_str) / 100.0 if influence_pct_str else 0.005
+    try: influence_rate = float(str(influence_pct_str).replace('%', '').strip()) / 100.0 if influence_pct_str else 0.005
     except: influence_rate = 0.005
     
     df_share['dt'] = pd.to_datetime(df_share['日期']); df_price['dt'] = pd.to_datetime(df_price['日期'])
@@ -284,7 +284,6 @@ def process_tdcc_dynamic(df_share, df_price, dead_chip_str, base_money_str, infl
         p = row['收盤價(元)']
         if pd.isna(p) or p == 0: continue
         
-        # 精準接收您已經算好的張數
         total_units = row.get('total_張數', 0)
         if pd.isna(total_units) or total_units == 0:
             total_units = row.get('總張數', 0)
@@ -317,18 +316,22 @@ def process_tdcc_dynamic(df_share, df_price, dead_chip_str, base_money_str, infl
                 try: large_pct += float(val)
                 except: pass
         
-        if dead_chip_pct > 0 and dead_chip_pct < 1:
-            active_pool = 1.0 - dead_chip_pct
-            c_val = ((large_pct / 100.0) - dead_chip_pct) / active_pool
+        # 📌 C-Value 精準浮點數計算 (直接使用 100.0 基數，避免小數點溢位)
+        if dead_chip_pct > 0 and dead_chip_pct < 100:
+            active_pool = 100.0 - dead_chip_pct
+            c_val = (large_pct - dead_chip_pct) / active_pool
             c_val = max(0, c_val) 
             
-            if c_val > 0.5: status = "🔴 絕對控盤"
+            if c_val >= 0.5: status = "🔴 絕對控盤"
             elif c_val >= 0.3: status = "🟡 高度鎖碼"
             elif c_val >= 0.15: status = "🔵 初步集結"
             else: status = "⚪ 籌碼渙散"
+            
+            c_display = round(c_val * 100, 1)
         else:
             c_val = large_pct / 100.0
             status = "未輸入死籌碼"
+            c_display = "-"
 
         out.append({
             "日期": row['日期'], 
@@ -337,8 +340,8 @@ def process_tdcc_dynamic(df_share, df_price, dead_chip_str, base_money_str, infl
             "主導門檻": "影響力" if influence_threshold > money_threshold else "財力",
             "精算門檻(張)": ceiling_t, 
             "級距總佔比(%)": round(large_pct, 2),
-            "死籌碼(%)": int(dead_chip_pct * 100) if dead_chip_str else "-",
-            "活大戶影響力C(%)": round(c_val * 100, 1) if dead_chip_str else "-",
+            "死籌碼(%)": round(dead_chip_pct, 2) if dead_chip_str else "-",
+            "活大戶影響力C(%)": c_display,
             "實戰判定": status
         })
     return pd.DataFrame(out)
@@ -393,9 +396,6 @@ def process_fut_inst(df):
         if col not in pdf.columns: pdf[col] = 0
     return pdf.rename(columns={'date': '日期', 'Foreign_Investor': '外資多空(口)', 'Investment_Trust': '投信多空(口)', 'Dealer': '自營多空(口)'}).tail(15).sort_values('日期', ascending=False)
 
-# ==========================================
-# 項目 11 以後新增函式 (空表防呆與繁體中文化)
-# ==========================================
 def process_opt_inst(df):
     if df.empty: return pd.DataFrame()
     df['net_oi_amt'] = ((pd.to_numeric(df['long_open_interest_balance_amount'], errors='coerce').fillna(0) - pd.to_numeric(df['short_open_interest_balance_amount'], errors='coerce').fillna(0)) / 1000).round().astype(int)
@@ -462,7 +462,6 @@ if run_btn:
             df_rev = df_rev_raw.rename(columns={"revenue":"月營收(百萬元)"})[['營收月份','月營收(百萬元)']].tail(15) if '營收月份' in df_rev_raw.columns else pd.DataFrame()
             if not df_rev.empty: df_rev['月營收(百萬元)'] = (df_rev['月營收(百萬元)']/1000000).round().astype(int)
         
-        # 分點資料並發抓取 (包含前一日到近60日)
         df_branch_raw = fetch_fm_branch_fast_parallel(actual_dates[:60])
         df_b_today = process_branch_data(df_branch_raw, 1, actual_dates)
         df_b_prev1 = process_branch_data(df_branch_raw, 1, actual_dates[1:]) if len(actual_dates) > 1 else pd.DataFrame()
@@ -472,7 +471,6 @@ if run_btn:
         df_b_30 = process_branch_data(df_branch_raw, 30, actual_dates)
         df_b_60 = process_branch_data(df_branch_raw, 60, actual_dates)
 
-        # 官股進出
         df_gov = pd.DataFrame()
         if not df_b_today.empty:
             govs = ["台銀", "土銀", "彰銀", "第一", "兆豐", "華南", "合庫", "台企銀"]
@@ -481,7 +479,6 @@ if run_btn:
         df_pledge_summary, df_pledge_detail = scrape_fubon_pledge(df_price_raw)
         df_fut = process_fut_inst(fetch_fm("TaiwanFuturesInstitutionalInvestors", d_60, specific_id=False, target_id="TX"))
         
-        # 新增 11 以後項目抓取
         df_div = process_div(fetch_fm("TaiwanStockDividend", "2015-01-01"))
         df_per = process_per(fetch_fm("TaiwanStockPER", d_60))
         start_probe_180 = (datetime.date.today() - datetime.timedelta(days=180)).strftime("%Y-%m-%d")
@@ -493,7 +490,7 @@ if run_btn:
         
         df_opt_inst = process_opt_inst(fetch_fm("TaiwanOptionInstitutionalInvestors", d_60, specific_id=False, target_id="TXO"))
 
-        st.success("✅ 雙軸 C-Value 引擎運算完畢！完整資料包已掛載。")
+        st.success("✅ V36 浮點數精算完畢！C-Value 與 23 項資料包已完美掛載。")
         def show(title, df):
             st.markdown(f"#### {title}")
             if df is None or df.empty: st.warning("此區塊查無數據或無發行紀錄")
@@ -515,8 +512,6 @@ if run_btn:
             st.markdown(df_pledge_detail.to_html(index=False, border=1), unsafe_allow_html=True)
             
         show("▼▼▼ 10. 台指期貨三大法人未平倉 (大盤) [來源：FinMind] ▼▼▼", df_fut)
-        
-        # 顯示 11 以後項目
         show("▼▼▼ 11. 歷年股利 [來源：FinMind] ▼▼▼", df_div)
         show("▼▼▼ 12. 本益比、淨值比與殖利率 [來源：FinMind] ▼▼▼", df_per)
         show("▼▼▼ 13. 處置有價證券狀態 [來源：FinMind] ▼▼▼", df_disp)
