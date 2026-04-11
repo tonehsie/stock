@@ -13,20 +13,26 @@ st.set_page_config(page_title="台股全息量化系統 (全自動終極版)", l
 # 內建最新 Sponsor Token
 FINMIND_TOKEN = "eyJ0eXAiOiJKV1QiLCJhbGciOiJIUzI1NiJ9.eyJkYXRlIjoiMjAyNi0wNC0xMCAyMDoyMDo0NiIsInVzZXJfaWQiOiJUb25lMSIsImVtYWlsIjoidG9uZWhzaWVAZ21haWwuY29tIiwiaXAiOiI2MS42Mi43LjE5OCJ9.7s3-IrkfdiUyTvGiZQGESBUBAPHQTnd4pwYcn8_J-CY"
 
-st.title("🤖 交易員實戰手冊：全息量化擷取系統")
-st.markdown("✅ **董監死籌碼自動爬取** | ✅ **買賣家數差自動加總** | ✅ **雙軸大戶 C-Value 引擎**")
+# 📌 注入全局 CSS：讓所有資料表格的數字全面靠右對齊，表頭置中
+st.markdown("""
+<style>
+table.dataframe td { text-align: right !important; }
+table.dataframe th { text-align: center !important; }
+</style>
+""", unsafe_allow_html=True)
 
-# UI 輸入區 
-col1, col2, col3, col4, col5 = st.columns([1, 1, 1, 1, 1])
+st.title("🤖 交易員實戰手冊：全息量化擷取系統")
+st.markdown("✅ **數字全靠右對齊** | ✅ **董監死籌碼與家數差自動化** | ✅ **雙軸 C-Value 引擎**")
+
+# UI 輸入區 (移除手動家數差，版面更洗鍊)
+col1, col2, col3, col4 = st.columns([1, 1, 1, 1])
 with col1:
     stock_id = st.text_input("個股代號", value="7711")
 with col2:
-    bs_diff_manual = st.text_input("手動家數差", placeholder="不填則自動算")
-with col3:
     dead_chip_input = st.text_input("死籌碼 %", placeholder="不填則自動抓")
-with col4:
+with col3:
     money_input = st.text_input("財力設定(萬)", value="5000")
-with col5:
+with col4:
     influence_input = st.text_input("影響力設定(%)", value="0.5")
 
 st.write("")
@@ -68,7 +74,6 @@ def scrape_director_holding(target_id):
         headers = {"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36"}
         url = f"https://tw.stock.yahoo.com/quote/{target_id}/profile"
         res = requests.get(url, headers=headers, timeout=5)
-        # 暴力破解 HTML，尋找「董監持股」後面的百分比數字
         match = re.search(r'董監持股.*?(\d+\.?\d*)\s*[%％]', res.text)
         if match:
             return float(match.group(1))
@@ -309,7 +314,7 @@ def process_tdcc(df):
     return df_wide, df_unit, df_people, df_percent, df_avg
 
 def process_tdcc_dynamic(df_share, df_price, dead_chip_str, auto_dead_chip, base_money_str, influence_pct_str, branch_diff_map):
-    """📌 C-Value 實戰引擎 (加入自動死籌碼判定與買賣家數差)"""
+    """📌 C-Value 實戰引擎 (買賣家數差自動對應)"""
     if df_share.empty or df_price.empty: return pd.DataFrame()
     
     is_auto_chip = False
@@ -366,7 +371,7 @@ def process_tdcc_dynamic(df_share, df_price, dead_chip_str, auto_dead_chip, base
             "精算門檻(張)": ceiling_t, "級距總佔比(%)": round(l_pct, 2),
             "死籌碼(%)": chip_label,
             "活大戶影響力C(%)": c_display,
-            "買賣家數差(自動)": auto_diff,
+            "買賣家數差": auto_diff,
             "實戰判定": status
         })
     return pd.DataFrame(out)
@@ -453,7 +458,7 @@ def process_cbas(df):
 # 執行主引擎
 # ==========================================
 if run_btn:
-    with st.spinner(f"正在擷取 {stock_id} 數據，並啟動死籌碼自動探勘..."):
+    with st.spinner(f"正在擷取 {stock_id} 數據，並全自動計算家數差..."):
         start_probe = (datetime.date.today() - datetime.timedelta(days=1095)).strftime("%Y-%m-%d")
         df_p_raw = fetch_fm("TaiwanStockPrice", start_probe)
         if df_p_raw.empty: st.error("查無股價資料"); st.stop()
@@ -461,7 +466,6 @@ if run_btn:
         actual_dates = sorted(df_p_raw['date'].unique().tolist(), reverse=True)
         d_60 = actual_dates[59] if len(actual_dates) >= 60 else actual_dates[-1]
         
-        # 📌 自動爬取 Yahoo 董監持股
         auto_dead_chip = scrape_director_holding(stock_id)
         
         df_branch_raw = fetch_fm_branch_fast_parallel(actual_dates[:60])
@@ -472,7 +476,6 @@ if run_btn:
         
         df_price = process_price(df_p_raw)
         
-        # 📌 傳入自訂與自動死籌碼供引擎判斷
         df_share_dynamic = process_tdcc_dynamic(df_share_wide, df_price, dead_chip_input, auto_dead_chip, money_input, influence_input, branch_diff_map)
         
         df_twse = scrape_twse_block(actual_dates[0])
@@ -507,7 +510,7 @@ if run_btn:
         df_cbas = process_cbas(df_cbas_raw[df_cbas_raw['cb_id'].astype(str).str.startswith(stock_id)]) if not df_cbas_raw.empty else pd.DataFrame()
         df_opt_inst = process_opt_inst(fetch_fm("TaiwanOptionInstitutionalInvestors", d_60, specific_id=False, target_id="TXO"))
 
-        st.success("✅ V40 終極版運算完畢！死籌碼自動爬蟲與手動覆蓋機制已啟動。")
+        st.success("✅ V41 引擎運算完畢！數字已全面靠右對齊。")
         def show(title, df):
             st.markdown(f"#### {title}")
             if df is None or df.empty: st.warning("此區塊查無數據或無發行紀錄")
@@ -543,8 +546,8 @@ if run_btn:
         show("▼▼▼ 21. CBAS 可轉債數據 [來源：FinMind] ▼▼▼", df_cbas)
         show("▼▼▼ 22. 台指選擇權三大法人未平倉 (大盤) [來源：FinMind] ▼▼▼", df_opt_inst)
         
-        st.markdown("#### ▼▼▼ 23. 買賣家數差明細 (手動/自動對照) ▼▼▼")
-        st.info(f"自動計算今日數值：{branch_diff_map.get(actual_dates[0], '計算中')}")
+        st.markdown("#### ▼▼▼ 23. 買賣家數差明細 ▼▼▼")
+        st.info(f"今日家數差：{branch_diff_map.get(actual_dates[0], '查無數據')}")
 
         st.divider(); st.subheader("📋 【給 Gemini 的量化分析資料包】")
         p = f"請幫我分析 {stock_id} 的量化籌碼。大戶門檻已雙軸精算，買賣家數差已由分點明細自動加總。\n\n"
@@ -573,6 +576,6 @@ if run_btn:
         p += format_to_gas(df_gov, "20. 八大官股進出 (今日)")
         p += format_to_gas(df_cbas, "21. CBAS 可轉債數據")
         p += format_to_gas(df_opt_inst, "22. 台指選擇權三大法人未平倉 (大盤)")
-        p += f"▼▼▼ 23. 買賣家數差明細 (自動) ▼▼▼, \n{str(branch_diff_map.get(actual_dates[0], '查無數據')) + ','}\n"
+        p += f"▼▼▼ 23. 買賣家數差明細 ▼▼▼, \n{str(branch_diff_map.get(actual_dates[0], '查無數據')) + ','}\n"
         
         st.code(p, language="text")
