@@ -9,7 +9,7 @@ import re
 import concurrent.futures
 
 # 設定網頁標題與佈局
-st.set_page_config(page_title="台股全息量化系統 (V11.1 高敏防雷版)", layout="wide")
+st.set_page_config(page_title="台股全息量化系統 (V12.0 比例化終極版)", layout="wide")
 
 # 內建最新 Sponsor Token
 FINMIND_TOKEN = "eyJ0eXAiOiJKV1QiLCJhbGciOiJIUzI1NiJ9.eyJkYXRlIjoiMjAyNi0wNC0xMCAyMDoyMDo0NiIsInVzZXJfaWQiOiJUb25lMSIsImVtYWlsIjoidG9uZWhzaWVAZ21haWwuY29tIiwiaXAiOiI2MS42Mi43LjE5OCJ9.7s3-IrkfdiUyTvGiZQGESBUBAPHQTnd4pwYcn8_J-CY"
@@ -23,7 +23,7 @@ table.dataframe th { text-align: center !important; }
 """, unsafe_allow_html=True)
 
 st.title("🤖 交易員實戰手冊：全息量化擷取系統")
-st.markdown("✅ **V11.1 專家診斷引擎 (自動降維與高敏防雷版)** | ✅ **集保與家數差淨化分離** | ✅ **五引擎火力全開 (含玩股網+偽裝Cookie)**")
+st.markdown("✅ **V12.0 專家雷達 (比例化降維防雷版)** | ✅ **集保與家數差淨化分離** | ✅ **五引擎火力全開 (含玩股網+偽裝Cookie)**")
 
 # UI 輸入區
 col1, col2, col3, col4 = st.columns([1, 1, 1, 1])
@@ -74,7 +74,6 @@ def scrape_director_holding(target_id):
         "Accept-Language": "zh-TW,zh;q=0.9,en-US;q=0.8,en;q=0.7",
     }
     
-    # 引擎 1：玩股網 WantGoo (JSON API，不易被擋且對新股支援佳)
     try:
         url_wantgoo = f"https://www.wantgoo.com/stock/api/company/profile?StockNo={target_id}"
         res = requests.get(url_wantgoo, headers=headers, timeout=5).json()
@@ -82,7 +81,6 @@ def scrape_director_holding(target_id):
         if 0 < val < 100.0: return val, "玩股網"
     except: pass
 
-    # 引擎 2：Goodinfo 台灣股市資訊網 (加入偽造 Cookie 突破 403 阻擋)
     try:
         url_good = f"https://goodinfo.tw/tw/StockDirectorSharehold.asp?STOCK_ID={target_id}"
         headers_good = headers.copy()
@@ -104,7 +102,6 @@ def scrape_director_holding(target_id):
                         if 0 < parsed_val < 100.0: return parsed_val, "Goodinfo"
     except: pass
 
-    # 引擎 3：Yahoo 財經 API
     try:
         url_yahoo = f"https://tw.stock.yahoo.com/quote/{target_id}/profile"
         res = requests.get(url_yahoo, headers=headers, timeout=5)
@@ -114,7 +111,6 @@ def scrape_director_holding(target_id):
             if 0 < val < 100.0: return val, "Yahoo"
     except: pass
 
-    # 引擎 4：鉅亨網 後台 API
     try:
         url_cnyes = f"https://ws.cnyes.com/web/api/v1/page/normal/stock/TWS/{target_id}/profile"
         res = requests.get(url_cnyes, headers=headers, timeout=5).json()
@@ -122,7 +118,6 @@ def scrape_director_holding(target_id):
         if 0 < val < 100.0: return val, "鉅亨網"
     except: pass
     
-    # 引擎 5：富邦證券 zca 基本資料 (傳統網頁解析)
     try:
         url_fubon = f"https://fubon-ebrokerdj.fbs.com.tw/z/zc/zca/zca_{target_id}.djhtm"
         res = requests.get(url_fubon, headers=headers, timeout=5)
@@ -444,75 +439,82 @@ def process_tdcc_dynamic(df_share, df_price, dead_chip_str, auto_dead_chip, base
     return out_df
 
 # ==========================================
-# 📌 1-2. V11.1 專家診斷引擎 (高敏防雷版)
+# 📌 1-2. V12.0 專家診斷引擎 (比例化降維防雷版)
 # ==========================================
-def get_expert_advice_v11(row):
+def get_expert_advice_v12(row):
     advice = []
+    
     if pd.isna(row['1000張變動(%)']): return "⚪ 數據初始化..."
     
-    # 邏輯 1：高檔出貨 / 逃命警報 (散戶暴接刀，大中戶跑路)
-    # ⚠️ V11.1 高敏修正：人數 > 800 且大戶微減 0.5% 即觸發警報
-    if row['總人數變動'] > 800 and (row['1000張變動(%)'] < -0.5 or row['作戰區變動(%)'] < -0.5):
-        advice.append("💀 [逃命警報] 散戶爆量接刀，主力高檔瘋狂倒貨，請立即清倉！")
-        return " | ".join(advice) # 最高危險，直接返回不看其他訊號
+    # 邏輯 1：高檔出貨 / 逃命警報 (比例化：散戶暴增 > 2%，大中戶倒貨)
+    if row['總人數變動率(%)'] > 2.0 and (row['1000張變動(%)'] < -0.5 or row['作戰區變動(%)'] < -0.5):
+        advice.append("💀 [逃命警報] 散戶爆量接刀(>2%)，主力高檔瘋狂倒貨，請立即清倉！")
+        return " | ".join(advice) # 最高危險，直接返回，不看其他訊號
 
     # 邏輯 2：真軋空 vs 假質押 (配合散戶退場判定)
     if row['1000張變動(%)'] > 2.0:
-        if row['總人數變動'] < 0:
+        if row['總人數變動率(%)'] < 0:
             advice.append("🚀 [暴力軋空] 大戶暴力掃貨且散戶退場，真金白銀推升！")
         else:
             advice.append("⚠️ [異常集中] 提防大股東質押或內部撥轉，需確認股價漲幅。")
 
     # 邏輯 3：自動降維打擊 (頂層死水掩護，中層暗中吃貨)
-    if abs(row['1000張變動(%)']) <= 0.05 and row['作戰區變動(%)'] > 0.5 and row['總人數變動'] < 0:
+    if abs(row['1000張變動(%)']) <= 0.05 and row['作戰區變動(%)'] > 0.5 and row['總人數變動率(%)'] < 0:
         advice.append("🔴 [降維鎖碼] 頂層死水掩護！主力躲在中層(200-800張)暗中吃貨。")
 
-    # 邏輯 4：定員增持 (人數不變，原班人馬狂買)
-    if row['中實戶人數變動'] == 0 and row['中實戶張數變動'] > 50:
+    # 邏輯 4：定員增持 (人數不變，但作戰區佔比明顯增加)
+    if row['中實戶人數變動'] == 0 and row['作戰區變動(%)'] >= 0.2:
         advice.append("🔥 [定員增持] 中實戶原班人馬持續加碼，強烈鎖碼意志！")
 
-    # 邏輯 5：分身群聚 (原有 K值 規律鎖碼)
+    # 邏輯 5：分身群聚 (保留 K值 絕對規律)
     if row['中實戶人數變動'] >= 2 and 200 <= row['K_Value'] <= 600:
         advice.append("🔴 [分身群聚] 偵測到隱藏合資集團，K值極度規律。")
 
-    # 邏輯 6：惡意甩轎 (散戶湧入，主力完全沒退)
-    if row['總人數變動'] > 800 and row['核心區變動(%)'] >= -0.1 and row['作戰區變動(%)'] >= -0.1:
+    # 邏輯 6：惡意甩轎 (比例化：散戶湧入 > 1.5%，但主力完全沒退)
+    if row['總人數變動率(%)'] > 1.5 and row['核心區變動(%)'] >= -0.1 and row['作戰區變動(%)'] >= -0.1:
         if "💀" not in advice[0] if advice else True: # 確保不是出貨
             advice.append("🟣 [惡意甩轎] 散戶爆量湧入但主力沒退，刻意讓道洗盤。")
+            
+    # 邏輯 7：螞蟻搬家 (籌碼緩步優化)
+    if -2.0 < row['總人數變動率(%)'] < 0 and row['作戰區變動(%)'] > 0:
+        advice.append("🟡 [螞蟻搬家] 籌碼緩步沉澱，具備長線緩漲特徵。")
 
     return " | ".join(advice) if advice else "🔵 趨勢盤整/無明顯主力訊號"
 
-def fetch_and_analyze_v11(df_wide):
+def process_v12_ultimate_radar(df_wide):
     if df_wide.empty or len(df_wide) < 2: return pd.DataFrame()
     
     df = df_wide.sort_values('日期', ascending=True).copy()
     
     df['總股東人數'] = df['總人數(人)']
     df['1000張以上佔比(%)'] = df['1000張以上_比例(%)']
-    df['中實戶人數'] = df['200-400張_人數'] + df['400-600張_人數']
-    df['中實戶總數'] = df['200-400張_張數'] + df['400-600張_張數']
     
-    df['核心區張數'] = df['400-600張_張數'] + df['600-800張_張數'] + df['800-1000張_張數'] + df['1000張以上_張數']
+    # 對應 Level 12 (中實戶 200~400張)
+    df['中實戶人數'] = df['200-400張_人數']
+    df['中實戶總數'] = df['200-400張_張數']
+    
+    # 核心區總合：400張以上 (Level 13~16)
     df['核心區佔比(%)'] = df['400-600張_比例(%)'] + df['600-800張_比例(%)'] + df['800-1000張_比例(%)'] + df['1000張以上_比例(%)']
-    df['作戰區佔比(%)'] = df['200-400張_比例(%)'] + df['400-600張_比例(%)'] + df['600-800張_比例(%)']
     
-    df['1_10張人數'] = df['1-999股_人數'] + df['1-5張_人數'] + df['5-10張_人數']
-    df['10_50張人數'] = df['10-15張_人數'] + df['15-20張_人數'] + df['20-30張_人數'] + df['30-40張_人數'] + df['40-50張_人數']
+    # 降維打擊作戰區：200~800張總合 (Level 12~14)
+    df['作戰區佔比(%)'] = df['200-400張_比例(%)'] + df['400-600張_比例(%)'] + df['600-800張_比例(%)']
 
-    df['總人數變動'] = df['總股東人數'].diff()
+    # 散戶指標全面升級為「總人數變動率 (%)」
+    df['總人數變動率(%)'] = (df['總股東人數'].diff() / df['總股東人數'].shift(1) * 100).round(2)
     df['1000張變動(%)'] = df['1000張以上佔比(%)'].diff().round(2)
-    df['中實戶人數變動'] = df['中實戶人數'].diff()
-    df['中實戶張數變動'] = df['中實戶總數'].diff()
     df['核心區變動(%)'] = df['核心區佔比(%)'].diff().round(2)
     df['作戰區變動(%)'] = df['作戰區佔比(%)'].diff().round(2)
-    df['1_10張人數變動'] = df['1_10張人數'].diff()
-    df['10_50張人數變動'] = df['10_50張人數'].diff()
+    df['中實戶人數變動'] = df['中實戶人數'].diff()
+    df['中實戶張數變動'] = df['中實戶總數'].diff()
     
-    df['K_Value'] = np.where(df['中實戶人數變動'] > 0, (df['中實戶張數變動'] / df['中實戶人數變動']).round(1), 0)
+    # 照妖鏡：K_Value (規律係數)
+    df['K_Value'] = np.where(df['中實戶人數變動'] > 0, (df['中實戶張數變動'] / df['中實戶人數變動']).round(1), 0.0)
     
-    df['V11_診斷說明'] = df.apply(get_expert_advice_v11, axis=1)
+    # 套用 V12 比例化專家診斷引擎
+    df['V12_實戰診斷'] = df.apply(get_expert_advice_v12, axis=1)
     
-    report_columns = ['日期', '總人數變動', '1000張變動(%)', '作戰區變動(%)', 'K_Value', 'V11_診斷說明']
+    # 整理輸出格式 (最新日期放最上面)
+    report_columns = ['日期', '總人數變動率(%)', '1000張變動(%)', '作戰區變動(%)', 'K_Value', 'V12_實戰診斷']
     final_report = df[report_columns].sort_values('日期', ascending=False).fillna(0).head(10)
     final_report.columns = list(final_report.columns)
     return final_report
@@ -619,7 +621,7 @@ def process_cbas(df):
 # 執行主引擎
 # ==========================================
 if run_btn:
-    with st.spinner(f"正在擷取 {stock_id} 數據，並啟動 V11.1 專家診斷引擎..."):
+    with st.spinner(f"正在擷取 {stock_id} 數據，並啟動 V12.0 比例化終極雷達..."):
         start_probe = (datetime.date.today() - datetime.timedelta(days=1095)).strftime("%Y-%m-%d")
         df_p_raw = fetch_fm("TaiwanStockPrice", start_probe)
         if df_p_raw.empty: st.error("查無股價資料"); st.stop()
@@ -646,8 +648,8 @@ if run_btn:
         # 📌 產生淨化版 C-Value (不含家數差)
         df_share_dynamic = process_tdcc_dynamic(df_share_wide, df_price, dead_chip_input, auto_dead_chip, money_input, influence_input)
         
-        # 📌 啟動 V11.1 高敏防雷雷達 
-        df_v11_radar = fetch_and_analyze_v11(df_share_wide)
+        # 📌 啟動 V12.0 專家診斷雷達 
+        df_v12_radar = process_v12_ultimate_radar(df_share_wide)
         
         df_twse = scrape_twse_block(actual_dates[0])
         df_margin = process_margin(fetch_fm("TaiwanStockMarginPurchaseShortSale", d_60))
@@ -683,14 +685,14 @@ if run_btn:
         df_cbas = process_cbas(df_cbas_raw[df_cbas_raw['cb_id'].astype(str).str.startswith(stock_id)]) if not df_cbas_raw.empty else pd.DataFrame()
         df_opt_inst = process_opt_inst(fetch_fm("TaiwanOptionInstitutionalInvestors", d_60, specific_id=False, target_id="TXO"))
 
-        st.success("✅ V11.1 引擎運算完畢！逃命警報高敏化 (-0.5%) 更新成功。")
+        st.success("✅ V12.0 引擎運算完畢！全面啟動比例化降維防雷掃描。")
         def show(title, df):
             st.markdown(f"#### {title}")
             if df is None or df.empty: st.warning("此區塊查無數據或無發行紀錄")
             else: st.markdown(df.to_html(index=False, border=1), unsafe_allow_html=True)
             
         show("▼▼▼ 1-1. 雙軸活大戶鎖碼判定表 (C-Value) ▼▼▼", df_share_dynamic)
-        show("▼▼▼ 1-2. V11.1 專家診斷雷達 (自動降維與高敏防雷版) ▼▼▼", df_v11_radar)
+        show("▼▼▼ 1-2. V12.0 專家診斷雷達 (比例化降維防雷版) ▼▼▼", df_v12_radar)
         show("▼▼▼ 2-1. 集保分級 - 張數表 (近10週) ▼▼▼", df_share_unit)
         show("▼▼▼ 2-2. 集保分級 - 人數表 (近10週) ▼▼▼", df_share_people)
         show("▼▼▼ 2-3. 集保分級 - 比例表 (%) ▼▼▼", df_share_pct)
@@ -722,9 +724,9 @@ if run_btn:
         show("▼▼▼ 23. 買賣家數差明細 (近15日) [來源：系統自算] ▼▼▼", df_branch_diff)
 
         st.divider(); st.subheader("📋 【給 Gemini 的量化分析資料包】")
-        p = f"請幫我分析 {stock_id} 的量化籌碼。已套用 V11.1 專家雷達，大戶門檻已雙軸精算。\n\n"
+        p = f"請幫我分析 {stock_id} 的量化籌碼。已套用 V12.0 專家雷達，大戶門檻已雙軸精算。\n\n"
         p += format_to_gas(df_share_dynamic, "1-1. 雙軸活大戶鎖碼判定表 (C-Value)")
-        p += format_to_gas(df_v11_radar, "1-2. V11.1 專家診斷雷達 (自動降維與高敏防雷版)")
+        p += format_to_gas(df_v12_radar, "1-2. V12.0 專家診斷雷達 (比例化降維防雷版)")
         p += format_to_gas(df_share_unit, "2-1. 集保分級 - 張數表")
         p += format_to_gas(df_share_people, "2-2. 集保分級 - 人數表")
         p += format_to_gas(df_share_pct, "2-3. 集保分級 - 比例表 (%)")
