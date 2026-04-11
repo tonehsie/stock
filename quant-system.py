@@ -9,7 +9,7 @@ import re
 import concurrent.futures
 
 # 設定網頁標題與佈局
-st.set_page_config(page_title="台股全息量化系統 (V11.0 自動降維與防雷版)", layout="wide")
+st.set_page_config(page_title="台股全息量化系統 (V11.1 高敏防雷版)", layout="wide")
 
 # 內建最新 Sponsor Token
 FINMIND_TOKEN = "eyJ0eXAiOiJKV1QiLCJhbGciOiJIUzI1NiJ9.eyJkYXRlIjoiMjAyNi0wNC0xMCAyMDoyMDo0NiIsInVzZXJfaWQiOiJUb25lMSIsImVtYWlsIjoidG9uZWhzaWVAZ21haWwuY29tIiwiaXAiOiI2MS42Mi43LjE5OCJ9.7s3-IrkfdiUyTvGiZQGESBUBAPHQTnd4pwYcn8_J-CY"
@@ -23,7 +23,7 @@ table.dataframe th { text-align: center !important; }
 """, unsafe_allow_html=True)
 
 st.title("🤖 交易員實戰手冊：全息量化擷取系統")
-st.markdown("✅ **V11.0 專家診斷引擎 (自動降維與防雷版)** | ✅ **集保與家數差淨化分離** | ✅ **五引擎火力全開 (含玩股網+偽裝Cookie)**")
+st.markdown("✅ **V11.1 專家診斷引擎 (自動降維與高敏防雷版)** | ✅ **集保與家數差淨化分離** | ✅ **五引擎火力全開 (含玩股網+偽裝Cookie)**")
 
 # UI 輸入區
 col1, col2, col3, col4 = st.columns([1, 1, 1, 1])
@@ -444,14 +444,15 @@ def process_tdcc_dynamic(df_share, df_price, dead_chip_str, auto_dead_chip, base
     return out_df
 
 # ==========================================
-# 📌 1-2. V11.0 專家診斷引擎 (自動降維與防雷版)
+# 📌 1-2. V11.1 專家診斷引擎 (高敏防雷版)
 # ==========================================
 def get_expert_advice_v11(row):
     advice = []
     if pd.isna(row['1000張變動(%)']): return "⚪ 數據初始化..."
     
     # 邏輯 1：高檔出貨 / 逃命警報 (散戶暴接刀，大中戶跑路)
-    if row['總人數變動'] > 1000 and (row['1000張變動(%)'] < -1.0 or row['作戰區變動(%)'] < -1.0):
+    # ⚠️ V11.1 高敏修正：人數 > 800 且大戶微減 0.5% 即觸發警報
+    if row['總人數變動'] > 800 and (row['1000張變動(%)'] < -0.5 or row['作戰區變動(%)'] < -0.5):
         advice.append("💀 [逃命警報] 散戶爆量接刀，主力高檔瘋狂倒貨，請立即清倉！")
         return " | ".join(advice) # 最高危險，直接返回不看其他訊號
 
@@ -618,7 +619,7 @@ def process_cbas(df):
 # 執行主引擎
 # ==========================================
 if run_btn:
-    with st.spinner(f"正在擷取 {stock_id} 數據，並啟動 V11.0 專家診斷引擎..."):
+    with st.spinner(f"正在擷取 {stock_id} 數據，並啟動 V11.1 專家診斷引擎..."):
         start_probe = (datetime.date.today() - datetime.timedelta(days=1095)).strftime("%Y-%m-%d")
         df_p_raw = fetch_fm("TaiwanStockPrice", start_probe)
         if df_p_raw.empty: st.error("查無股價資料"); st.stop()
@@ -645,7 +646,7 @@ if run_btn:
         # 📌 產生淨化版 C-Value (不含家數差)
         df_share_dynamic = process_tdcc_dynamic(df_share_wide, df_price, dead_chip_input, auto_dead_chip, money_input, influence_input)
         
-        # 📌 啟動 V11.0 專家診斷雷達 
+        # 📌 啟動 V11.1 高敏防雷雷達 
         df_v11_radar = fetch_and_analyze_v11(df_share_wide)
         
         df_twse = scrape_twse_block(actual_dates[0])
@@ -682,14 +683,14 @@ if run_btn:
         df_cbas = process_cbas(df_cbas_raw[df_cbas_raw['cb_id'].astype(str).str.startswith(stock_id)]) if not df_cbas_raw.empty else pd.DataFrame()
         df_opt_inst = process_opt_inst(fetch_fm("TaiwanOptionInstitutionalInvestors", d_60, specific_id=False, target_id="TXO"))
 
-        st.success("✅ V11.0 引擎運算完畢！引入作戰區與降維打擊判定。")
+        st.success("✅ V11.1 引擎運算完畢！逃命警報高敏化 (-0.5%) 更新成功。")
         def show(title, df):
             st.markdown(f"#### {title}")
             if df is None or df.empty: st.warning("此區塊查無數據或無發行紀錄")
             else: st.markdown(df.to_html(index=False, border=1), unsafe_allow_html=True)
             
         show("▼▼▼ 1-1. 雙軸活大戶鎖碼判定表 (C-Value) ▼▼▼", df_share_dynamic)
-        show("▼▼▼ 1-2. V11.0 專家診斷雷達 (自動降維與防雷版) ▼▼▼", df_v11_radar)
+        show("▼▼▼ 1-2. V11.1 專家診斷雷達 (自動降維與高敏防雷版) ▼▼▼", df_v11_radar)
         show("▼▼▼ 2-1. 集保分級 - 張數表 (近10週) ▼▼▼", df_share_unit)
         show("▼▼▼ 2-2. 集保分級 - 人數表 (近10週) ▼▼▼", df_share_people)
         show("▼▼▼ 2-3. 集保分級 - 比例表 (%) ▼▼▼", df_share_pct)
@@ -721,9 +722,9 @@ if run_btn:
         show("▼▼▼ 23. 買賣家數差明細 (近15日) [來源：系統自算] ▼▼▼", df_branch_diff)
 
         st.divider(); st.subheader("📋 【給 Gemini 的量化分析資料包】")
-        p = f"請幫我分析 {stock_id} 的量化籌碼。已套用 V11.0 專家雷達，大戶門檻已雙軸精算。\n\n"
+        p = f"請幫我分析 {stock_id} 的量化籌碼。已套用 V11.1 專家雷達，大戶門檻已雙軸精算。\n\n"
         p += format_to_gas(df_share_dynamic, "1-1. 雙軸活大戶鎖碼判定表 (C-Value)")
-        p += format_to_gas(df_v11_radar, "1-2. V11.0 專家診斷雷達 (自動降維與防雷版)")
+        p += format_to_gas(df_v11_radar, "1-2. V11.1 專家診斷雷達 (自動降維與高敏防雷版)")
         p += format_to_gas(df_share_unit, "2-1. 集保分級 - 張數表")
         p += format_to_gas(df_share_people, "2-2. 集保分級 - 人數表")
         p += format_to_gas(df_share_pct, "2-3. 集保分級 - 比例表 (%)")
