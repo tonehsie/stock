@@ -764,7 +764,15 @@ def process_div(df):
     if df.empty: return pd.DataFrame()
     df_out = df.rename(columns={"date": "公告日期", "year": "股利年份", "StockEarningsDistribution": "盈餘配股(元)", "StockStatutorySurplus": "公積配股(元)", "CashEarningsDistribution": "盈餘配息(元)", "CashStatutorySurplus": "公積配息(元)"})
     cols = [c for c in ["公告日期", "股利年份", "盈餘配息(元)", "公積配息(元)", "盈餘配股(元)", "公積配股(元)"] if c in df_out.columns]
-    df_res = df_out[cols].tail(5).sort_values('公告日期', ascending=False)
+    
+    # 改為抓取近 5 「年」的所有紀錄 (解決季配息公司只顯示一年多資料的問題)
+    if '股利年份' in df_out.columns:
+        df_out['股利年份'] = pd.to_numeric(df_out['股利年份'], errors='coerce')
+        recent_years = sorted(df_out['股利年份'].dropna().unique(), reverse=True)[:5]
+        df_res = df_out[df_out['股利年份'].isin(recent_years)][cols].sort_values(['公告日期'], ascending=[False])
+    else:
+        df_res = df_out[cols].sort_values('公告日期', ascending=False).head(10) # 備案防呆
+
     df_res.columns = list(df_res.columns)
     return df_res
 
@@ -818,7 +826,6 @@ if run_btn:
             df_rev_raw['營收月份'] = df_rev_raw['revenue_year'].astype(str) + "-" + df_rev_raw['revenue_month'].astype(str).str.zfill(2)
             df_rev = df_rev_raw.rename(columns={"revenue":"月營收(百萬元)"})[['營收月份','月營收(百萬元)']].tail(24)
             df_rev['月營收(百萬元)'] = (df_rev['月營收(百萬元)']/1000000).round().astype(int)
-            # 確保營收表格也是把「最新月份」排序在最上面
             df_rev = df_rev.sort_values('營收月份', ascending=False)
             df_rev.columns = list(df_rev.columns)
         
@@ -886,13 +893,20 @@ if run_btn:
                     else:
                         format_dict[c] = fmt_auto
 
-                left_cols = [c for c in df.columns if any(kw in str(c) for kw in ['分點', '名稱', '姓名', '身份別', '質權人', '交易別', '診斷', '判定', '門檻', '條件', '措施', '契約', '代號', '來源'])]
+                # 確保「日期」欄位靠左且強制不斷行
+                left_cols = [c for c in df.columns if any(kw in str(c) for kw in ['日期', '分點', '名稱', '姓名', '身份別', '質權人', '交易別', '診斷', '判定', '門檻', '條件', '措施', '契約', '代號', '來源'])]
                 right_cols = [c for c in df.columns if c not in left_cols]
 
                 styler = df.style.format(format_dict)
                 styler = styler.set_properties(**{'text-align': 'right !important'}, subset=right_cols)
+                
                 if left_cols:
-                    styler = styler.set_properties(**{'text-align': 'left !important'}, subset=left_cols)
+                    styler = styler.set_properties(**{'text-align': 'left !important', 'white-space': 'nowrap'}, subset=left_cols)
+
+                # 特定針對日期欄位強化不換行規則
+                date_cols = [c for c in df.columns if '日期' in str(c)]
+                if date_cols:
+                    styler = styler.set_properties(**{'white-space': 'nowrap'}, subset=date_cols)
 
                 try: styler = styler.hide(axis="index")
                 except: styler = styler.hide_index()
