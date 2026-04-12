@@ -33,9 +33,9 @@ st.title("🤖 交易員實戰手冊：全息量化擷取系統")
 # UI 輸入區 
 col1, col2 = st.columns([1, 1])
 with col1:
-    user_stock_id = st.text_input("個股代號", value="1785")
+    user_stock_id = st.text_input("個股代號", value="2330")
 with col2:
-    dead_chip_input = st.text_input("死籌碼 %", placeholder="自動抓取，以董監事持股比例為主，可自行輸入比例。", help="自動抓取，以董監事持股比例為主，可自行輸入比例（董監事＋大股東）。")
+    dead_chip_input = st.text_input("死籌碼 %", placeholder="自動抓取，以董監事持股比例為主，可自行輸入比例（董監事＋大股東）。", help="自動抓取，以董監事持股比例為主，可自行輸入比例（董監事＋大股東）。")
 
 st.write("")
 run_btn = st.button("🚀 啟動引擎：擷取全息資料並產生 Prompt", use_container_width=True)
@@ -803,7 +803,7 @@ if run_btn:
         dynamic_dict, static_val, chip_engine, debug_log = scrape_director_holding(user_stock_id)
         
         if not (dead_chip_input and str(dead_chip_input).strip() != "") and len(dynamic_dict) == 0 and static_val == 0:
-            st.error(f"⚠️ 死籌碼引擎無回應，可能遭防火牆阻擋。連線紀錄: {', '.join(debug_log)}。請於上方手手動輸入死籌碼！")
+            st.error(f"⚠️ 死籌碼引擎無回應，可能遭防火牆阻擋。連線紀錄: {', '.join(debug_log)}。請於上方手動輸入死籌碼！")
 
         df_branch_raw = fetch_fm_branch_fast_parallel(actual_dates[:60], user_stock_id)
         df_branch_diff = process_branch_diff(df_branch_raw, actual_dates)
@@ -917,21 +917,23 @@ if run_btn:
                 if custom_class: html = html.replace('<table', f'<table class="{custom_class}"')
                 st.markdown(html, unsafe_allow_html=True)
             
-        show("▼▼▼ 1. 雙軸活大戶鎖碼判定表 (C-Value) (近8週) ▼▼▼", df_share_dynamic)
-        show("▼▼▼ 2. 專家診斷雷達 (近8週) ▼▼▼", df_v24_radar, custom_class="radar-table")
-        show("▼▼▼ 3. 集保分級 - 張數表 (近8週) ▼▼▼", df_share_unit)
-        show("▼▼▼ 4. 集保分級 - 人數表 (近8週) ▼▼▼", df_share_people)
+        show("▼▼▼ 1-1. 雙軸活大戶鎖碼判定表 (C-Value) (近8週) ▼▼▼", df_share_dynamic)
+        show("▼▼▼ 1-2. 專家診斷雷達 (近8週) ▼▼▼", df_v24_radar, custom_class="radar-table")
+        show("▼▼▼ 2-1. 集保分級 - 張數表 (近8週) ▼▼▼", df_share_unit)
+        show("▼▼▼ 2-2. 集保分級 - 人數表 (近8週) ▼▼▼", df_share_people)
         
         if df_twse.empty:
-            st.markdown(f"#### ▼▼▼ 5. 鉅額交易明細 (近3日) [來源：證交所/櫃買中心] ▼▼▼")
+            st.markdown(f"#### ▼▼▼ 3. 鉅額交易明細 (近3日) [來源：證交所/櫃買中心] ▼▼▼")
             err_msg = ", ".join(twse_log) if twse_log else "本檔股票近 3 營業日無鉅額交易紀錄"
             st.warning(err_msg)
         else:
-            show("▼▼▼ 5. 鉅額交易明細 (近3日) [來源：證交所/櫃買中心] ▼▼▼", df_twse)
+            show("▼▼▼ 3. 鉅額交易明細 (近3日) [來源：證交所/櫃買中心] ▼▼▼", df_twse)
             
-        show("▼▼▼ 6. 散戶資券餘額 (近10天) [來源：FinMind] ▼▼▼", df_margin)
-        show("▼▼▼ 7. 現股當沖明細 (近10天) [來源：FinMind] ▼▼▼", df_day_trade)
-        show("▼▼▼ 8. 法人買賣超 (近10天) [來源：FinMind] ▼▼▼", df_inst)
+        show("▼▼▼ 4. 散戶資券餘額 (近10天) [來源：FinMind] ▼▼▼", df_margin)
+        show("▼▼▼ 5. 現股當沖明細 (近10天) [來源：FinMind] ▼▼▼", df_day_trade)
+        show("▼▼▼ 6. 法人買賣超 (近10天) [來源：FinMind] ▼▼▼", df_inst)
+        show("▼▼▼ 7. 收盤價量 (近10天) [來源：FinMind] ▼▼▼", df_price.head(10))
+        show("▼▼▼ 8. 月營收 (百萬元) (近24個月) ▼▼▼", df_rev)
         
         show(f"▼▼▼ 9-1. 主力分點 - 今日 ({actual_dates[0]}) [來源：FinMind] ▼▼▼", df_b_today)
         show(f"▼▼▼ 9-2. 主力分點 - 前一日 ({actual_dates[1] if len(actual_dates)>1 else '無'}) [來源：FinMind] ▼▼▼", df_b_prev1)
@@ -941,22 +943,20 @@ if run_btn:
         show("▼▼▼ 9-6. 主力分點 - 近30日 [來源：FinMind] ▼▼▼", df_b_30)
         show("▼▼▼ 9-7. 主力分點 - 近60日 [來源：FinMind] ▼▼▼", df_b_60)
         
-        show("▼▼▼ 10. 收盤價量 (近10天) [來源：FinMind] ▼▼▼", df_price.head(10))
-        show("▼▼▼ 11. 月營收 (百萬元) (近24個月) ▼▼▼", df_rev)
-        show("▼▼▼ 12. 八大官股進出 (今日) [來源：FinMind] ▼▼▼", df_gov)
-        show("▼▼▼ 13. 買賣家數差明細 (近10天) [來源：系統自算] ▼▼▼", df_branch_diff)
+        show("▼▼▼ 16. 八大官股進出 (今日) [來源：FinMind] ▼▼▼", df_gov)
+        show("▼▼▼ 17. 買賣家數差明細 (近10天) [來源：系統自算] ▼▼▼", df_branch_diff)
         
-        st.markdown("#### ▼▼▼ 14. 董監大股東質設明細 [來源：富邦證券] ▼▼▼")
+        st.markdown("#### ▼▼▼ 18. 董監大股東質設明細 [來源：富邦證券] ▼▼▼")
         if df_pledge_detail.empty: st.warning("此區塊查無數據")
         else:
             if not df_pledge_summary.empty: st.markdown(df_pledge_summary.to_html(index=False, border=1), unsafe_allow_html=True)
             st.markdown(df_pledge_detail.to_html(index=False, border=1), unsafe_allow_html=True)
             
-        show("▼▼▼ 15. 台指期貨三大法人未平倉 (大盤) (近10天) [來源：FinMind] ▼▼▼", df_fut)
-        show("▼▼▼ 16. 歷年股利 (近5年) [來源：FinMind] ▼▼▼", df_div)
-        show("▼▼▼ 17. 本益比、淨值比與殖利率 (近10天) [來源：FinMind] ▼▼▼", df_per)
-        show("▼▼▼ 18. 處置有價證券狀態 [來源：FinMind] ▼▼▼", df_disp)
-        show("▼▼▼ 19. CBAS 可轉債數據 [來源：FinMind] ▼▼▼", df_cbas)
+        show("▼▼▼ 19. 台指期貨三大法人未平倉 (大盤) (近10天) [來源：FinMind] ▼▼▼", df_fut)
+        show("▼▼▼ 20. 歷年股利 (近5年) [來源：FinMind] ▼▼▼", df_div)
+        show("▼▼▼ 21. 本益比、淨值比與殖利率 (近10天) [來源：FinMind] ▼▼▼", df_per)
+        show("▼▼▼ 22. 處置有價證券狀態 [來源：FinMind] ▼▼▼", df_disp)
+        show("▼▼▼ 23. CBAS 可轉債數據 [來源：FinMind] ▼▼▼", df_cbas)
 
         st.divider()
         
@@ -964,14 +964,16 @@ if run_btn:
             name_str = f" {stock_name}" if stock_name else ""
             p = f"請依下面最新的盤後資料幫我分析 {user_stock_id}{name_str} 的量化籌碼，必須以我給的資料優先使用。\n\n"
             
-            p += format_to_gas(df_share_dynamic, "1. 雙軸活大戶鎖碼判定表 (C-Value) (近8週)")
-            p += format_to_gas(df_v24_radar, "2. 專家診斷雷達 (近8週)")
-            p += format_to_gas(df_share_unit, "3. 集保分級 - 張數表 (近8週)")
-            p += format_to_gas(df_share_people, "4. 集保分級 - 人數表 (近8週)")
-            p += format_to_gas(df_twse, "5. 鉅額交易明細 (近3日)")
-            p += format_to_gas(df_margin, "6. 散戶資券餘額 (近10天)")
-            p += format_to_gas(df_day_trade, "7. 現股當沖明細 (近10天)")
-            p += format_to_gas(df_inst, "8. 法人買賣超 (近10天)")
+            p += format_to_gas(df_share_dynamic, "1-1. 雙軸活大戶鎖碼判定表 (C-Value) (近8週)")
+            p += format_to_gas(df_v24_radar, "1-2. 專家診斷雷達 (近8週)")
+            p += format_to_gas(df_share_unit, "2-1. 集保分級 - 張數表 (近8週)")
+            p += format_to_gas(df_share_people, "2-2. 集保分級 - 人數表 (近8週)")
+            p += format_to_gas(df_twse, "3. 鉅額交易明細 (近3日)")
+            p += format_to_gas(df_margin, "4. 散戶資券餘額 (近10天)")
+            p += format_to_gas(df_day_trade, "5. 現股當沖明細 (近10天)")
+            p += format_to_gas(df_inst, "6. 法人買賣超 (近10天)")
+            p += format_to_gas(df_price.head(10), "7. 收盤價量 (近10天)")
+            p += format_to_gas(df_rev, "8. 月營收 (百萬元) (近24個月)")
             p += format_to_gas(df_b_today, f"9-1. 主力分點 - 今日 ({actual_dates[0]})")
             p += format_to_gas(df_b_prev1, "9-2. 主力分點 - 前一日")
             p += format_to_gas(df_b_3, "9-3. 主力分點 - 近3日")
@@ -979,15 +981,13 @@ if run_btn:
             p += format_to_gas(df_b_20, "9-5. 主力分點 - 近20日")
             p += format_to_gas(df_b_30, "9-6. 主力分點 - 近30日")
             p += format_to_gas(df_b_60, "9-7. 主力分點 - 近60日")
-            p += format_to_gas(df_price.head(10), "10. 收盤價量 (近10天)")
-            p += format_to_gas(df_rev, "11. 月營收 (百萬元) (近24個月)")
-            p += format_to_gas(df_gov, "12. 八大官股進出 (今日)")
-            p += format_to_gas(df_branch_diff, "13. 買賣家數差明細 (近10天)")
-            p += format_pledge_to_gas(df_pledge_summary, df_pledge_detail, "14")
-            p += format_to_gas(df_fut, "15. 台指期貨三大法人未平倉 (大盤) (近10天)")
-            p += format_to_gas(df_div, "16. 歷年股利 (近5年)")
-            p += format_to_gas(df_per, "17. 本益比、淨值比與殖利率 (近10天)")
-            p += format_to_gas(df_disp, "18. 處置有價證券狀態")
-            p += format_to_gas(df_cbas, "19. CBAS 可轉債數據")
+            p += format_to_gas(df_gov, "16. 八大官股進出 (今日)")
+            p += format_to_gas(df_branch_diff, "17. 買賣家數差明細 (近10天)")
+            p += format_pledge_to_gas(df_pledge_summary, df_pledge_detail, "18")
+            p += format_to_gas(df_fut, "19. 台指期貨三大法人未平倉 (大盤) (近10天)")
+            p += format_to_gas(df_div, "20. 歷年股利 (近5年)")
+            p += format_to_gas(df_per, "21. 本益比、淨值比與殖利率 (近10天)")
+            p += format_to_gas(df_disp, "22. 處置有價證券狀態")
+            p += format_to_gas(df_cbas, "23. CBAS 可轉債數據")
             
             st.code(p, language="text")
