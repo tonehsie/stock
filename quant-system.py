@@ -15,7 +15,7 @@ import urllib3
 urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
 
 # 設定網頁標題與佈局
-st.set_page_config(page_title="台股全息量化系統 (V24.0 終極無瑕校正版)", layout="wide")
+st.set_page_config(page_title="台股全息量化系統 (V24.1 終極防呆版)", layout="wide")
 
 # 內建最新 Sponsor Token
 FINMIND_TOKEN = "eyJ0eXAiOiJKV1QiLCJhbGciOiJIUzI1NiJ9.eyJkYXRlIjoiMjAyNi0wNC0xMCAyMDoyMDo0NiIsInVzZXJfaWQiOiJUb25lMSIsImVtYWlsIjoidG9uZWhzaWVAZ21haWwuY29tIiwiaXAiOiI2MS42Mi43LjE5OCJ9.7s3-IrkfdiUyTvGiZQGESBUBAPHQTnd4pwYcn8_J-CY"
@@ -29,7 +29,7 @@ table.radar-table td:last-child { text-align: left !important; }
 """, unsafe_allow_html=True)
 
 st.title("🤖 交易員實戰手冊：全息量化擷取系統")
-st.markdown("✅ **V24.0 鐵桿鎖碼雷達 (完美數學校正)** | ✅ **低價反分身+智能門檻** | ✅ **鉅額(3日)+排版滿血**")
+st.markdown("✅ **V24.1 鐵桿鎖碼雷達 (終極防呆版)** | ✅ **嚴謹對齊門檻** | ✅ **鉅額(3日)+排版滿血**")
 
 # UI 輸入區 (全交由智能引擎精算門檻)
 col1, col2 = st.columns([1, 1])
@@ -295,23 +295,30 @@ def process_day_trading(df):
     return df_res
 
 # ==========================================
-# 📌 智能門檻計算引擎 (V24.0)
+# 📌 智能門檻計算引擎 (V24.1 嚴謹對齊版)
 # ==========================================
 def get_smart_threshold(price, capital_bn, dead_float):
-    if price <= 0: return 1000
+    if pd.isna(price) or price <= 0: return 1000 # 防呆
+    
+    # A. 智能財力 (萬) & 智能影響力 (%)
     sfc = max(3000, capital_bn * 500)
     si = max(0.1, 0.5 * (100 - dead_float) / 100)
     
+    # B. 轉換為物理張數
     shares_by_money = (sfc * 10000) / (price * 1000)
     shares_by_influence = (capital_bn * 10000) * (si / 100) 
     
     raw_threshold = max(shares_by_money, shares_by_influence)
     
+    # C. 統一對齊集保級距 (修復未對齊漏洞)
+    levels = [100, 200, 400, 600, 800, 1000]
+    aligned_threshold = min(levels, key=lambda x: abs(x - raw_threshold))
+    
+    # D. 低價股反分身封頂
     if price < 30:
-        return min(raw_threshold, 400)
-    else:
-        levels = [100, 200, 400, 600, 800, 1000]
-        return min(levels, key=lambda x: abs(x - raw_threshold))
+        return min(aligned_threshold, 400)
+    
+    return aligned_threshold
 
 # ==========================================
 # 📌 收盤價處理函式
@@ -549,26 +556,27 @@ def process_tdcc(df):
     
     return df_wide, df_unit, df_people, df_percent, df_avg
 
-def process_tdcc_dynamic(df_share, df_price, dead_chip_input, dynamic_dict, static_val, chip_engine):
-    if df_share.empty or df_price.empty: return pd.DataFrame()
+# ==========================================
+# 📌 1-1. 雙軸活大戶鎖碼判定表 (C-Value) 計算引擎
+# ==========================================
+def process_tdcc_dynamic(df_share_wide, df_price, dead_chip_input, dynamic_dict, static_val, chip_engine):
+    if df_share_wide.empty or df_price.empty: return pd.DataFrame()
     
-    df_s = df_share.copy()
+    df_s = df_share_wide.copy()
     df_p = df_price.copy()
     df_s['dt'] = pd.to_datetime(df_s['日期'])
     df_p['dt'] = pd.to_datetime(df_p['日期'])
+    
     df_m = pd.merge_asof(df_s.sort_values('dt'), df_p.sort_values('dt')[['dt', '收盤價(元)']], on='dt', direction='backward').sort_values('dt', ascending=False)
     
     out = []
     for _, row in df_m.iterrows():
-        p = row['收盤價(元)']
+        p = row.get('收盤價(元)', 0)
         d_str = row['日期']
         if pd.isna(p) or p == 0: continue
         
         current_dead_chip, chip_label = get_dead_chip_info(d_str, dead_chip_input, dynamic_dict, static_val, chip_engine)
-        
-        total_units = row.get('總張數', 0)
-        cap_bn = total_units / 10000 
-        
+        cap_bn = row.get('總張數', 0) / 10000
         ceiling_t = get_smart_threshold(p, cap_bn, current_dead_chip)
         
         l_cols = []
@@ -583,56 +591,63 @@ def process_tdcc_dynamic(df_share, df_price, dead_chip_input, dynamic_dict, stat
         
         c_display, status = "-", "無死籌碼數據"
         if 0 < current_dead_chip < 100:
-            active_pool = 100.0 - current_dead_chip
-            c_val = (l_pct - current_dead_chip) / active_pool
-            c_val = max(0, c_val)
+            c_val = max(0, (l_pct - current_dead_chip) / (100.0 - current_dead_chip))
             status = "🔴 絕對控盤" if c_val >= 0.5 else "🟡 高度鎖碼" if c_val >= 0.3 else "🔵 初步集結" if c_val >= 0.15 else "⚪ 籌碼渙散"
             c_display = round(c_val * 100, 1)
 
         out.append({
-            "日期": d_str, "收盤價(元)": p, "股本(億)": round(cap_bn, 2),
+            "日期": d_str, 
+            "收盤價(元)": p, 
+            "股本(億)": round(cap_bn, 2),
             "主導門檻": f"智能精算 ({int(ceiling_t)}張)",
             "級距總佔比(%)": round(l_pct, 2),
             "死籌碼(%)": f"{current_dead_chip}% ({chip_label})" if current_dead_chip > 0 else "-",
             "活大戶影響力C(%)": c_display,
             "實戰判定": status
         })
+        
     out_df = pd.DataFrame(out)
     if not out_df.empty: out_df.columns = list(out_df.columns)
     return out_df
 
 # ==========================================
-# 📌 1-2. V24.0 專家診斷引擎 (終極校正版)
+# 📌 1-2. V24.1 專家診斷雷達計算引擎
 # ==========================================
 def get_expert_advice_v24(row, dead_chip_input, dynamic_dict, static_val):
     advice = []
-    if pd.isna(row['1000張變動(%)']): return "⚪ 數據初始化..."
+    if pd.isna(row.get('1000張變動(%)')): return "⚪ 數據初始化..."
     
     current_dead_chip, _ = get_dead_chip_info(row['日期'], dead_chip_input, dynamic_dict, static_val, "")
-    leverage = 100 / (100 - current_dead_chip) if current_dead_chip < 100 and current_dead_chip > 0 else 1
+    leverage = 100 / (100 - current_dead_chip) if 0 < current_dead_chip < 100 else 1
     
     real_1000_change = row['1000張變動(%)'] * leverage
     real_combat_change = row['作戰區變動(%)'] * leverage
     max_intensity = real_1000_change if abs(real_1000_change) > abs(real_combat_change) else real_combat_change
 
-    price = row['收盤價(元)']
+    price = row.get('收盤價(元)', 0)
 
-    if price > 0 and price < 30 and row['1000張變動(%)'] >= 1.0:
+    # 💎 鐵桿鎖碼
+    if 0 < price < 30 and row['1000張變動(%)'] >= 1.0:
         advice.append(f"💎 [鐵桿鎖碼] 頂層真身大幅上揚，強度 {real_1000_change:.1f}%")
 
+    # 💀 逃命警報
     if row['總人數變動率(%)'] > 2.0 and (real_1000_change < -0.5 or real_combat_change < -0.5):
         advice.append(f"💀 [逃命警報] 散戶爆量接刀，活籌碼流出強度 {abs(max_intensity):.1f}%")
-        return " | ".join(advice)
+        return " | ".join(advice) 
 
+    # 🚀 暴力軋空
     if max_intensity > 3.0 and row['總人數變動率(%)'] < 0:
         advice.append(f"🚀 [暴力軋空] 活籌碼強勢壓縮 {max_intensity:.1f}%")
 
-    if row['中實戶人數變動'] >= 2 and 200 <= row['K_Value'] <= 600:
+    # 🔴 分身集結
+    if row.get('中實戶人數變動', 0) >= 2 and 200 <= row.get('K_Value', 0) <= 600:
         advice.append(f"🔴 [分身集結] 偵測到中層主力施工，K值({row['K_Value']})")
 
-    if row['中實戶人數變動'] == 0 and real_combat_change >= 0.5:
+    # 🔥 定員增持
+    if row.get('中實戶人數變動', -1) == 0 and real_combat_change >= 0.5:
         advice.append("🔥 [定員增持] 原班人馬持續加壓！")
 
+    # 🟣 惡意甩轎
     if row['總人數變動率(%)'] > 1.5 and real_1000_change >= -0.1 and real_combat_change >= -0.1:
         advice.append("🟣 [惡意甩轎] 散戶湧入但主力未退，刻意讓道洗盤")
 
@@ -641,42 +656,41 @@ def get_expert_advice_v24(row, dead_chip_input, dynamic_dict, static_val):
 def process_v24_ultimate_radar(df_wide, dead_chip_input, dynamic_dict, static_val, df_price):
     if df_wide.empty or len(df_wide) < 2: return pd.DataFrame()
     
-    # 📌 確保排序為「舊到新」，修正 pct_change 與 diff 的邏輯對齊問題
     df = df_wide.sort_values('日期', ascending=True).copy()
     
     df['dt_end'] = pd.to_datetime(df['日期'])
     df_p = df_price.copy()
-    if '日期' in df_p.columns and '收盤價(元)' in df_p.columns:
+    if not df_p.empty and '日期' in df_p.columns:
         df_p['dt'] = pd.to_datetime(df_p['日期'])
-        df = pd.merge_asof(df.sort_values('dt_end'), df_p.sort_values('dt')[['dt', '收盤價(元)']], left_on='dt_end', right_on='dt', direction='backward')
+        df = pd.merge_asof(df, df_p.sort_values('dt')[['dt', '收盤價(元)']], left_on='dt_end', right_on='dt', direction='backward')
     else:
         df['收盤價(元)'] = 0
+        
+    df['中實戶人數'] = df.get('200-400張_人數', 0)
+    df['中實戶總數'] = df.get('200-400張_張數', 0)
     
-    df['總股東人數'] = df['總人數(人)']
-    df['1000張以上佔比(%)'] = df['1000張以上_比例(%)']
-    df['中實戶人數'] = df['200-400張_人數']
-    df['中實戶總數'] = df['200-400張_張數']
-    df['核心區佔比(%)'] = df['400-600張_比例(%)'] + df['600-800張_比例(%)'] + df['800-1000張_比例(%)'] + df['1000張以上_比例(%)']
-    df['作戰區佔比(%)'] = df['200-400張_比例(%)'] + df['400-600張_比例(%)'] + df['600-800張_比例(%)']
+    df['核心區佔比(%)'] = df.get('400-600張_比例(%)',0) + df.get('600-800張_比例(%)',0) + df.get('800-1000張_比例(%)',0) + df.get('1000張以上_比例(%)',0)
+    df['作戰區佔比(%)'] = df.get('200-400張_比例(%)',0) + df.get('400-600張_比例(%)',0) + df.get('600-800張_比例(%)',0)
     
-    # 📌 數學邏輯完美修復：直接呼叫原生函數
-    df['總人數變動'] = df['總股東人數'].diff()
-    df['總人數變動率(%)'] = (df['總股東人數'].pct_change() * 100).round(2)
-    df['1000張變動(%)'] = df['1000張以上佔比(%)'].diff().round(2)
-    df['核心區變動(%)'] = df['核心區佔比(%)'].diff().round(2)
+    # 📌 完美對齊變動量計算
+    df['總人數變動率(%)'] = (df['總人數(人)'].pct_change() * 100).round(2)
+    df['1000張變動(%)'] = df.get('1000張以上_比例(%)', pd.Series([0]*len(df))).diff().round(2)
     df['作戰區變動(%)'] = df['作戰區佔比(%)'].diff().round(2)
     df['中實戶人數變動'] = df['中實戶人數'].diff()
     df['中實戶張數變動'] = df['中實戶總數'].diff()
     
-    df['K_Value'] = np.where(df['中實戶人數變動'] > 0, (df['中實戶張數變動'] / df['中實戶人數變動']).round(1), 0.0)
+    # 📌 避免除以零警告
+    def calc_k(row):
+        if row['中實戶人數變動'] >= 2 and row['中實戶張數變動'] > 0:
+            return round(row['中實戶張數變動'] / row['中實戶人數變動'], 1)
+        return 0.0
+    df['K_Value'] = df.apply(calc_k, axis=1)
     
     df['V24_實戰診斷'] = df.apply(lambda row: get_expert_advice_v24(row, dead_chip_input, dynamic_dict, static_val), axis=1)
     
     report_columns = ['日期', '收盤價(元)', '總人數變動率(%)', '1000張變動(%)', '作戰區變動(%)', 'K_Value', 'V24_實戰診斷']
-    
-    # 📌 轉換為「新到舊」供介面顯示
     final_report = df[report_columns].sort_values('日期', ascending=False).fillna(0).head(10)
-    final_report.columns = list(final_report.columns)
+    
     return final_report
 
 def process_margin(df):
@@ -768,7 +782,7 @@ def process_cbas(df):
 # 執行主引擎
 # ==========================================
 if run_btn:
-    with st.spinner(f"正在擷取 {stock_id} 數據，並啟動 V24.0 終極無瑕校正雷達..."):
+    with st.spinner(f"正在擷取 {stock_id} 數據，並啟動 V24.1 終極無瑕校正雷達..."):
         
         stock_name = get_stock_name(stock_id)
         
@@ -837,7 +851,7 @@ if run_btn:
         df_cbas = process_cbas(df_cbas_raw[df_cbas_raw['cb_id'].astype(str).str.startswith(stock_id)]) if not df_cbas_raw.empty else pd.DataFrame()
         df_opt_inst = process_opt_inst(fetch_fm("TaiwanOptionInstitutionalInvestors", d_60, specific_id=False, target_id="TXO"))
 
-        st.success("✅ V24.0 引擎運算完畢！數學邏輯完美校正。")
+        st.success("✅ V24.1 引擎運算完畢！數學邏輯完美校正。")
         
         # 📌 智能防呆排版引擎
         def show(title, df, custom_class=""):
@@ -901,7 +915,7 @@ if run_btn:
                 st.markdown(html, unsafe_allow_html=True)
             
         show("▼▼▼ 1-1. 雙軸活大戶鎖碼判定表 (C-Value) ▼▼▼", df_share_dynamic)
-        show("▼▼▼ 1-2. V24.0 專家診斷雷達 (終極數學校正版) ▼▼▼", df_v24_radar, custom_class="radar-table")
+        show("▼▼▼ 1-2. V24.1 專家診斷雷達 (終極數學校正版) ▼▼▼", df_v24_radar, custom_class="radar-table")
         show("▼▼▼ 2-1. 集保分級 - 張數表 (近10週) ▼▼▼", df_share_unit)
         show("▼▼▼ 2-2. 集保分級 - 人數表 (近10週) ▼▼▼", df_share_people)
         show("▼▼▼ 2-3. 集保分級 - 比例表 (%) ▼▼▼", df_share_pct)
@@ -939,18 +953,17 @@ if run_btn:
         show("▼▼▼ 19. 台指期貨三大法人未平倉 (大盤) [來源：FinMind] ▼▼▼", df_fut)
         show("▼▼▼ 20. 台指選擇權三大法人未平倉 (大盤) [來源：FinMind] ▼▼▼", df_opt_inst)
         show("▼▼▼ 21. 歷年股利 [來源：FinMind] ▼▼▼", df_div)
-        show("▼▼▼ 22. 本益比、淨值比與殖利率 [來源：FinMind] ▼▼▼", df_per)
+        show("▼▼▼ 22. 本益比、淨值比與殖 বাংলাকে [來源：FinMind] ▼▼▼", df_per)
         show("▼▼▼ 23. 處置有價證券狀態 [來源：FinMind] ▼▼▼", df_disp)
         show("▼▼▼ 24. CBAS 可轉債數據 [來源：FinMind] ▼▼▼", df_cbas)
 
         st.divider(); st.subheader("📋 【給 Gemini 的量化分析資料包】")
         
-        # 📌 全新專屬起手式 Prompt
         name_str = f" {stock_name}" if stock_name else ""
         p = f"請依下面最新的盤後資料幫我分析 {stock_id}{name_str} 的量化籌碼，必須以我給的資料優先使用。\n\n"
         
         p += format_to_gas(df_share_dynamic, "1-1. 雙軸活大戶鎖碼判定表 (C-Value)")
-        p += format_to_gas(df_v24_radar, "1-2. V24.0 專家診斷雷達 (終極無瑕版)")
+        p += format_to_gas(df_v24_radar, "1-2. V24.1 專家診斷雷達 (終極防呆版)")
         p += format_to_gas(df_share_unit, "2-1. 集保分級 - 張數表")
         p += format_to_gas(df_share_people, "2-2. 集保分級 - 人數表")
         p += format_to_gas(df_share_pct, "2-3. 集保分級 - 比例表 (%)")
