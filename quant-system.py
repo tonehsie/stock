@@ -491,9 +491,9 @@ def process_v24_ultimate_radar(df_wide, dead_chip_input, dynamic_dict, static_va
         return 0.0
     df['K_Value'] = df.apply(calc_k, axis=1)
     
-    df['V24_實戰診斷'] = df.apply(lambda row: get_expert_advice_v24(row, dead_chip_input, dynamic_dict, static_val), axis=1)
+    df['實戰診斷'] = df.apply(lambda row: get_expert_advice_v24(row, dead_chip_input, dynamic_dict, static_val), axis=1)
     
-    report_columns = ['日期', '收盤價(元)', '總人數變動率(%)', '1000張變動(%)', '作戰區變動(%)', 'K_Value', 'V24_實戰診斷']
+    report_columns = ['日期', '收盤價(元)', '總人數變動率(%)', '1000張變動(%)', '作戰區變動(%)', 'K_Value', '實戰診斷']
     final_report = df[report_columns].sort_values('日期', ascending=False).fillna(0)
     
     return final_report
