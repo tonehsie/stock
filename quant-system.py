@@ -15,7 +15,7 @@ import urllib3
 urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
 
 # 設定網頁標題與佈局
-st.set_page_config(page_title="台股全息量化系統 (V15.3 多引擎對照版)", layout="wide")
+st.set_page_config(page_title="台股全息量化系統 (V16.0 動態對時神盾版)", layout="wide")
 
 # 內建最新 Sponsor Token
 FINMIND_TOKEN = "eyJ0eXAiOiJKV1QiLCJhbGciOiJIUzI1NiJ9.eyJkYXRlIjoiMjAyNi0wNC0xMCAyMDoyMDo0NiIsInVzZXJfaWQiOiJUb25lMSIsImVtYWlsIjoidG9uZWhzaWVAZ21haWwuY29tIiwiaXAiOiI2MS42Mi43LjE5OCJ9.7s3-IrkfdiUyTvGiZQGESBUBAPHQTnd4pwYcn8_J-CY"
@@ -30,14 +30,14 @@ table.radar-table td:last-child { text-align: left !important; }
 """, unsafe_allow_html=True)
 
 st.title("🤖 交易員實戰手冊：全息量化擷取系統")
-st.markdown("✅ **V15.3 專家雷達** | ✅ **四大引擎死籌碼橫向對照** | ✅ **富邦 SSL 降級破壁**")
+st.markdown("✅ **V16.0 專家雷達 (動態籌碼對時)** | ✅ **Goodinfo月別+富邦備援** | ✅ **當沖數據回歸**")
 
 # UI 輸入區
 col1, col2, col3, col4 = st.columns([1, 1, 1, 1])
 with col1:
     stock_id = st.text_input("個股代號", value="7711")
 with col2:
-    dead_chip_input = st.text_input("死籌碼 %", placeholder="不填則以富邦精算優先")
+    dead_chip_input = st.text_input("死籌碼 %", placeholder="不填則優先啟動 Goodinfo 動態對時")
 with col3:
     money_input = st.text_input("財力設定(萬)", value="5000")
 with col4:
@@ -49,11 +49,11 @@ run_btn = st.button("🚀 啟動引擎：擷取全息資料並產生 Prompt", us
 st.divider()
 
 # ==========================================
-# 工具函式與四引擎爬蟲
+# 工具函式與多重死籌碼引擎
 # ==========================================
 
 def safe_get_fubon(url):
-    """📌 專門對付富邦老舊 SSL 憑證的降級爬蟲器"""
+    """📌 對付富邦老舊 SSL 憑證的降級爬蟲器"""
     try:
         ctx = ssl.create_default_context()
         ctx.check_hostname = False
@@ -95,12 +95,53 @@ def format_pledge_to_gas(df_summary, df_detail):
     return format_to_gas(df_summary, "18. 董監大股東質設 (餘額與斷頭預警)") + format_to_gas(df_detail, "董監大股東質設 (異動明細)")
 
 def scrape_director_holding(target_id):
-    """📌 V15.3 測試版死籌碼引擎：強制跑完所有引擎以利對照"""
+    """📌 V16.0 動態死籌碼引擎：Goodinfo 當月優先，富邦精算備援"""
     headers = {"User-Agent": "Mozilla/5.0"}
     debug_log = []
-    all_results = {}
-    
-    # 📌 引擎 1：富邦 ZCK (法人代表去重精算法)
+    dynamic_dict = {}
+    static_val = 0.0
+    chip_engine = "失敗"
+
+    # 📌 優先權 1：Goodinfo (抓取歷史月份變化)
+    try:
+        url_good = f"https://goodinfo.tw/tw/StockDirectorSharehold.asp?STOCK_ID={target_id}"
+        headers_good = headers.copy()
+        headers_good["Referer"] = f"https://goodinfo.tw/tw/StockDetail.asp?STOCK_ID={target_id}"
+        headers_good["Cookie"] = "CLIENT_KEY=20260411;" 
+        res = requests.get(url_good, headers=headers_good, timeout=8)
+        
+        if res.status_code == 200:
+            res.encoding = 'utf-8'
+            dfs = pd.read_html(StringIO(res.text))
+            for df in dfs:
+                if isinstance(df.columns, pd.MultiIndex):
+                    df.columns = ['_'.join(str(c) for c in col if 'Unnamed' not in str(c)).strip('_') for col in df.columns.values]
+                else:
+                    df.columns = df.columns.astype(str)
+                
+                target_col = next((c for c in df.columns if '全體董監持股' in str(c) and '持股(%)' in str(c).replace(' ', '')), None)
+                month_col = next((c for c in df.columns if '月別' in str(c)), None)
+                
+                if target_col and month_col:
+                    latest_val = 0.0
+                    for _, row in df.iterrows():
+                        m_str = str(row[month_col]).replace('/', '-').strip()
+                        v_str = str(row[target_col]).replace(',', '').strip()
+                        
+                        if re.match(r'^\d{4}-\d{2}$', m_str) and v_str not in ['-', '', 'nan']:
+                            try:
+                                val = float(v_str)
+                                if 0 < val < 100.0:
+                                    dynamic_dict[m_str] = val
+                                    if latest_val == 0.0: latest_val = val
+                            except: pass
+                    
+                    if dynamic_dict:
+                        return dynamic_dict, latest_val, "Goodinfo(動態期間)", debug_log
+    except Exception as e:
+        debug_log.append(f"Goodinfo錯誤: {e}")
+
+    # 📌 優先權 2：富邦 ZCK (法人代表去重精算法)
     try:
         url_fubon = f"https://fubon-ebrokerdj.fbs.com.tw/z/zc/zck/zck_{target_id}.djhtm"
         html = safe_get_fubon(url_fubon)
@@ -127,74 +168,46 @@ def scrape_director_holding(target_id):
                 
                 total_ratio = sum(entity_dict.values())
                 if 0 < total_ratio < 100.0:
-                    all_results['富邦(去重精算)'] = round(total_ratio, 2)
+                    return {}, round(total_ratio, 2), "富邦(去重精算)", debug_log
     except Exception as e: 
         debug_log.append(f"富邦錯誤: {e}")
-    
-    # 📌 引擎 2：Goodinfo
-    try:
-        url_good = f"https://goodinfo.tw/tw/StockDirectorSharehold.asp?STOCK_ID={target_id}"
-        headers_good = headers.copy()
-        headers_good["Referer"] = f"https://goodinfo.tw/tw/StockDetail.asp?STOCK_ID={target_id}"
-        headers_good["Cookie"] = "CLIENT_KEY=20260411;" 
-        res = requests.get(url_good, headers=headers_good, timeout=8)
-        res.encoding = 'utf-8'
-        dfs = pd.read_html(StringIO(res.text))
-        for df in dfs:
-            if isinstance(df.columns, pd.MultiIndex):
-                cols = ['_'.join(str(c) for c in col if 'Unnamed' not in str(c)).strip('_') for col in df.columns.values]
-                df.columns = cols
-            else:
-                df.columns = df.columns.astype(str)
-            
-            target_col = [c for c in df.columns if '全體董監持股' in str(c) and '持股(%)' in str(c).replace(' ', '')]
-            if target_col:
-                for val in df[target_col[0]]:
-                    if str(val).strip() not in ['-', '', 'nan']:
-                        try:
-                            parsed_val = float(str(val).strip())
-                            if 0 < parsed_val < 100.0: 
-                                all_results['Goodinfo(直接抓取)'] = parsed_val
-                                break
-                        except: pass
-                if 'Goodinfo(直接抓取)' in all_results: break
-    except Exception as e: 
-        debug_log.append(f"Goodinfo錯誤: {e}")
-    
-    # 📌 引擎 3：玩股網 API
+
+    # 📌 優先權 3：玩股網 API
     try:
         url_wantgoo = f"https://www.wantgoo.com/stock/api/company/profile?StockNo={target_id}"
-        res = requests.get(url_wantgoo, headers=headers, timeout=5).json()
-        val = float(res.get('directorHoldRatio', 0))
-        if 0 < val < 100.0: all_results['玩股網(API)'] = val
+        res = requests.get(url_wantgoo, headers={"User-Agent": "Mozilla/5.0"}, timeout=5)
+        if res.status_code == 200:
+            val = float(res.json().get('directorHoldRatio', 0))
+            if 0 < val < 100.0: return {}, val, "玩股網", debug_log
     except Exception as e: debug_log.append(f"玩股網錯誤: {e}")
 
-    # 📌 引擎 4：鉅亨網
+    # 📌 優先權 4：鉅亨網
     try:
         url_cnyes = f"https://ws.cnyes.com/web/api/v1/page/normal/stock/TWS/{target_id}/profile"
-        res = requests.get(url_cnyes, headers=headers, timeout=5).json()
+        res = requests.get(url_cnyes, headers={"User-Agent": "Mozilla/5.0"}, timeout=5).json()
         val = float(res['data']['profile']['directorHoldPercent'])
-        if 0 < val < 100.0: all_results['鉅亨網(API)'] = val
+        if 0 < val < 100.0: return {}, val, "鉅亨網", debug_log
     except Exception as e: debug_log.append(f"鉅亨網錯誤: {e}")
-    
-    # 決定第一優先引擎 (富邦 > Goodinfo > 玩股網 > 鉅亨)
-    primary_val = 0.0
-    primary_engine = "失敗"
-    
-    if '富邦(去重精算)' in all_results:
-        primary_val = all_results['富邦(去重精算)']
-        primary_engine = '富邦(去重精算)'
-    elif 'Goodinfo(直接抓取)' in all_results:
-        primary_val = all_results['Goodinfo(直接抓取)']
-        primary_engine = 'Goodinfo(直接抓取)'
-    elif '玩股網(API)' in all_results:
-        primary_val = all_results['玩股網(API)']
-        primary_engine = '玩股網(API)'
-    elif '鉅亨網(API)' in all_results:
-        primary_val = all_results['鉅亨網(API)']
-        primary_engine = '鉅亨網(API)'
 
-    return primary_val, primary_engine, debug_log, all_results
+    return {}, 0.0, "失敗", debug_log
+
+def get_dead_chip_info(date_str, dead_chip_input, dynamic_dict, static_val, chip_engine):
+    """根據日期自動尋找對應的死籌碼比例"""
+    if dead_chip_input and str(dead_chip_input).strip() != "":
+        try: return float(str(dead_chip_input).replace('%', '').strip()), "手動"
+        except: pass
+        
+    month_key = str(date_str)[:7]
+    if dynamic_dict and month_key in dynamic_dict:
+        return dynamic_dict[month_key], "Goodinfo當月"
+        
+    if dynamic_dict and len(dynamic_dict) > 0:
+        return list(dynamic_dict.values())[0], "Goodinfo最新"
+        
+    if static_val > 0:
+        return static_val, chip_engine
+        
+    return 0.0, "-"
 
 def process_day_trading(df):
     if df.empty: return pd.DataFrame()
@@ -281,7 +294,7 @@ def process_branch_top15(df_raw, period_days, actual_dates):
     return out
 
 # ==========================================
-# 質押與鉅額
+# 質押與鉅額 
 # ==========================================
 def extract_fubon_table(html_text, trigger, cols):
     start_idx = html_text.find(trigger)
@@ -456,17 +469,9 @@ def process_tdcc(df):
     
     return df_wide, df_unit, df_people, df_percent, df_avg
 
-def process_tdcc_dynamic(df_share, df_price, dead_chip_str, auto_dead_chip, base_money_str, influence_pct_str):
+def process_tdcc_dynamic(df_share, df_price, dead_chip_input, dynamic_dict, static_val, chip_engine, base_money_str, influence_pct_str):
     if df_share.empty or df_price.empty: return pd.DataFrame()
     
-    is_auto_chip = False
-    if dead_chip_str and str(dead_chip_str).strip() != "":
-        try: dead_chip_pct = float(str(dead_chip_str).replace('%', '').strip())
-        except: dead_chip_pct = 0.0
-    else:
-        dead_chip_pct = auto_dead_chip
-        is_auto_chip = True
-
     try: base_money_wan = float(str(base_money_str).replace(',', '').strip()) if base_money_str else 5000.0
     except: base_money_wan = 5000.0
     try: influence_rate = float(str(influence_pct_str).replace('%', '').strip()) / 100.0 if influence_pct_str else 0.005
@@ -482,6 +487,9 @@ def process_tdcc_dynamic(df_share, df_price, dead_chip_str, auto_dead_chip, base
     for _, row in df_m.iterrows():
         p, d_str = row['收盤價(元)'], row['日期']
         if pd.isna(p) or p == 0: continue
+        
+        # 📌 動態對應死籌碼 (V16.0 核心)
+        current_dead_chip, chip_label = get_dead_chip_info(d_str, dead_chip_input, dynamic_dict, static_val, chip_engine)
         
         total_units = row.get('總張數', 0)
         money_t = (base_money_wan * 10000) / (p * 1000)
@@ -499,21 +507,19 @@ def process_tdcc_dynamic(df_share, df_price, dead_chip_str, auto_dead_chip, base
 
         l_pct = sum([pd.to_numeric(row.get(c, 0), errors='coerce') for c in l_cols])
         
-        c_display, status = "-", "未輸入死籌碼"
-        if 0 < dead_chip_pct < 100:
-            active_pool = 100.0 - dead_chip_pct
-            c_val = (l_pct - dead_chip_pct) / active_pool
+        c_display, status = "-", "無死籌碼數據"
+        if 0 < current_dead_chip < 100:
+            active_pool = 100.0 - current_dead_chip
+            c_val = (l_pct - current_dead_chip) / active_pool
             c_val = max(0, c_val)
             status = "🔴 絕對控盤" if c_val >= 0.5 else "🟡 高度鎖碼" if c_val >= 0.3 else "🔵 初步集結" if c_val >= 0.15 else "⚪ 籌碼渙散"
             c_display = round(c_val * 100, 1)
-
-        chip_label = f"{round(dead_chip_pct, 2)} ({'自動' if is_auto_chip else '手動'})" if dead_chip_pct > 0 else "-"
 
         out.append({
             "日期": d_str, "收盤價(元)": p, "股本(億)": round(total_units/10000, 2),
             "主導門檻": "影響力" if infl_t > money_t else "財力",
             "精算門檻(張)": ceiling_t, "級距總佔比(%)": round(l_pct, 2),
-            "死籌碼(%)": chip_label,
+            "死籌碼(%)": f"{current_dead_chip}% ({chip_label})" if current_dead_chip > 0 else "-",
             "活大戶影響力C(%)": c_display,
             "實戰判定": status
         })
@@ -522,15 +528,18 @@ def process_tdcc_dynamic(df_share, df_price, dead_chip_str, auto_dead_chip, base
     return out_df
 
 # ==========================================
-# 📌 1-2. V15.2 專家診斷引擎
+# 📌 1-2. V16.0 專家診斷引擎 (動態籌碼對時版)
 # ==========================================
-def get_expert_advice_v15_2(row, dead_shares):
+def get_expert_advice_v16(row, dead_chip_input, dynamic_dict, static_val):
     advice = []
     if pd.isna(row['1000張變動(%)']): return "⚪ 數據初始化..."
     
-    leverage = 100 / (100 - dead_shares) if dead_shares < 100 and dead_shares > 0 else 1
+    current_dead_chip, _ = get_dead_chip_info(row['日期'], dead_chip_input, dynamic_dict, static_val, "")
+    leverage = 100 / (100 - current_dead_chip) if current_dead_chip < 100 and current_dead_chip > 0 else 1
+    
     real_1000_change = row['1000張變動(%)'] * leverage
     real_combat_change = row['作戰區變動(%)'] * leverage
+
     max_intensity = real_1000_change if abs(real_1000_change) > abs(real_combat_change) else real_combat_change
 
     if row['總人數變動'] > 800 and (real_1000_change < -0.5 or real_combat_change < -0.5):
@@ -557,9 +566,11 @@ def get_expert_advice_v15_2(row, dead_shares):
 
     return " | ".join(advice) if advice else "🔵 趨勢盤整/無明顯訊號"
 
-def process_v15_ultimate_radar(df_wide, dead_chip_val, df_price):
+def process_v16_ultimate_radar(df_wide, dead_chip_input, dynamic_dict, static_val, df_price):
     if df_wide.empty or len(df_wide) < 2: return pd.DataFrame()
+    
     df = df_wide.sort_values('日期', ascending=True).copy()
+    
     df['dt_end'] = pd.to_datetime(df['日期'])
     df_p = df_price.copy()
     if '日期' in df_p.columns and '收盤價(元)' in df_p.columns:
@@ -570,10 +581,13 @@ def process_v15_ultimate_radar(df_wide, dead_chip_val, df_price):
     
     df['總股東人數'] = df['總人數(人)']
     df['1000張以上佔比(%)'] = df['1000張以上_比例(%)']
+    
     df['中實戶人數'] = df['200-400張_人數']
     df['中實戶總數'] = df['200-400張_張數']
+    
     df['核心區佔比(%)'] = df['400-600張_比例(%)'] + df['600-800張_比例(%)'] + df['800-1000張_比例(%)'] + df['1000張以上_比例(%)']
     df['作戰區佔比(%)'] = df['200-400張_比例(%)'] + df['400-600張_比例(%)'] + df['600-800張_比例(%)']
+
     df['總人數變動'] = df['總股東人數'].diff()
     df['總人數變動率(%)'] = (df['總股東人數'].diff() / df['總股東人數'].shift(1) * 100).round(2)
     df['1000張變動(%)'] = df['1000張以上佔比(%)'].diff().round(2)
@@ -581,10 +595,12 @@ def process_v15_ultimate_radar(df_wide, dead_chip_val, df_price):
     df['作戰區變動(%)'] = df['作戰區佔比(%)'].diff().round(2)
     df['中實戶人數變動'] = df['中實戶人數'].diff()
     df['中實戶張數變動'] = df['中實戶總數'].diff()
-    df['K_Value'] = np.where(df['中實戶人數變動'] > 0, (df['中實戶張數變動'] / df['中實戶人數變動']).round(1), 0.0)
-    df['V15_實戰診斷'] = df.apply(lambda row: get_expert_advice_v15_2(row, dead_chip_val), axis=1)
     
-    report_columns = ['日期', '收盤價(元)', '總人數變動率(%)', '1000張變動(%)', '作戰區變動(%)', 'K_Value', 'V15_實戰診斷']
+    df['K_Value'] = np.where(df['中實戶人數變動'] > 0, (df['中實戶張數變動'] / df['中實戶人數變動']).round(1), 0.0)
+    
+    df['V16_實戰診斷'] = df.apply(lambda row: get_expert_advice_v16(row, dead_chip_input, dynamic_dict, static_val), axis=1)
+    
+    report_columns = ['日期', '收盤價(元)', '總人數變動率(%)', '1000張變動(%)', '作戰區變動(%)', 'K_Value', 'V16_實戰診斷']
     final_report = df[report_columns].sort_values('日期', ascending=False).fillna(0).head(10)
     final_report.columns = list(final_report.columns)
     return final_report
@@ -691,7 +707,7 @@ def process_cbas(df):
 # 執行主引擎
 # ==========================================
 if run_btn:
-    with st.spinner(f"正在擷取 {stock_id} 數據，並啟動 V15.3 多引擎對照版..."):
+    with st.spinner(f"正在擷取 {stock_id} 數據，並啟動 V16.0 神盾雷達..."):
         start_probe = (datetime.date.today() - datetime.timedelta(days=1095)).strftime("%Y-%m-%d")
         df_p_raw = fetch_fm("TaiwanStockPrice", start_probe)
         if df_p_raw.empty: st.error("查無股價資料"); st.stop()
@@ -700,27 +716,17 @@ if run_btn:
         d_60 = actual_dates[59] if len(actual_dates) >= 60 else actual_dates[-1]
         df_price = process_price(df_p_raw)
         
-        # 📌 執行死籌碼多重爬蟲引擎 (全部強制跑完)
-        auto_dead_chip, chip_engine, debug_log, all_results = scrape_director_holding(stock_id)
+        # 📌 執行死籌碼多重爬蟲引擎 (動態 Goodinfo 優先，富邦精算備援)
+        dynamic_dict, static_val, chip_engine, debug_log = scrape_director_holding(stock_id)
         
-        # 📌 在 UI 顯示對照表
-        st.write("### 🔍 各大引擎死籌碼抓取測試結果")
-        res_df = pd.DataFrame(list(all_results.items()), columns=['引擎', '抓取結果(%)'])
-        if not res_df.empty:
-            st.dataframe(res_df, use_container_width=True)
-        else:
-            st.warning(f"所有引擎皆抓取失敗。連線紀錄: {', '.join(debug_log)}")
-        
-        final_dead_chip = 0.0
         if dead_chip_input and str(dead_chip_input).strip() != "":
-            try: final_dead_chip = float(str(dead_chip_input).replace('%', '').strip())
-            except: final_dead_chip = auto_dead_chip
             st.toast("🤖 死籌碼：使用手動輸入數值", icon="✅")
-        elif auto_dead_chip > 0:
-            final_dead_chip = auto_dead_chip
-            st.toast(f"🤖 死籌碼引擎：採用 [{chip_engine}] {auto_dead_chip}%", icon="🎯")
+        elif len(dynamic_dict) > 0:
+            st.toast(f"🤖 死籌碼引擎：成功啟動 Goodinfo 動態對時", icon="🎯")
+        elif static_val > 0:
+            st.toast(f"🤖 死籌碼引擎：啟動 [{chip_engine}] 備援，數值 {static_val}%", icon="🛡️")
         else:
-            st.error(f"⚠️ 死籌碼引擎全滅！請於上方手動輸入死籌碼！")
+            st.error(f"⚠️ 死籌碼引擎全滅！連線紀錄: {', '.join(debug_log)}。請於上方手動輸入死籌碼！")
 
         df_branch_raw = fetch_fm_branch_fast_parallel(actual_dates[:60])
         df_branch_diff = process_branch_diff(df_branch_raw, actual_dates)
@@ -728,8 +734,11 @@ if run_btn:
         df_share_raw = fetch_fm("TaiwanStockHoldingSharesPer", d_60)
         df_share_wide, df_share_unit, df_share_people, df_share_pct, df_share_avg = process_tdcc(df_share_raw)
         
-        df_share_dynamic = process_tdcc_dynamic(df_share_wide, df_price, dead_chip_input, auto_dead_chip, money_input, influence_input)
-        df_v15_radar = process_v15_ultimate_radar(df_share_wide, final_dead_chip, df_price)
+        # 📌 產生淨化版 C-Value (1-1) - 導入動態對時
+        df_share_dynamic = process_tdcc_dynamic(df_share_wide, df_price, dead_chip_input, dynamic_dict, static_val, chip_engine, money_input, influence_input)
+        
+        # 📌 啟動 V16.0 專家診斷雷達 (1-2) - 導入動態對時
+        df_v16_radar = process_v16_ultimate_radar(df_share_wide, dead_chip_input, dynamic_dict, static_val, df_price)
         
         df_twse = scrape_twse_block(actual_dates[0])
         df_margin = process_margin(fetch_fm("TaiwanStockMarginPurchaseShortSale", d_60))
@@ -754,7 +763,7 @@ if run_btn:
 
         df_gov = pd.DataFrame()
         if not df_b_today.empty:
-            govs = ["台銀", "土銀", "彰銀", "第一", "兆豐", "華南", "合庫", "台企銀"]
+            govs = ["台銀", "土銀", "彰銀", "第一", "兆生", "華南", "合庫", "台企銀"]
             df_gov = df_b_today[df_b_today.astype(str).apply(lambda x: x.str.contains('|'.join(govs))).any(axis=1)]
             df_gov.columns = list(df_gov.columns)
 
@@ -767,7 +776,7 @@ if run_btn:
         df_cbas = process_cbas(df_cbas_raw[df_cbas_raw['cb_id'].astype(str).str.startswith(stock_id)]) if not df_cbas_raw.empty else pd.DataFrame()
         df_opt_inst = process_opt_inst(fetch_fm("TaiwanOptionInstitutionalInvestors", d_60, specific_id=False, target_id="TXO"))
 
-        st.success("✅ V15.3 對照版運算完畢！上方已顯示所有引擎抓取結果。")
+        st.success("✅ V16.0 引擎運算完畢！動態籌碼對時已實裝。")
         
         def show(title, df, custom_class=""):
             st.markdown(f"#### {title}")
@@ -777,7 +786,7 @@ if run_btn:
                 st.markdown(df.to_html(classes=class_str, index=False, border=1), unsafe_allow_html=True)
             
         show("▼▼▼ 1-1. 雙軸活大戶鎖碼判定表 (C-Value) ▼▼▼", df_share_dynamic)
-        show("▼▼▼ 1-2. V15.3 專家診斷雷達 ▼▼▼", df_v15_radar, custom_class="radar-table")
+        show("▼▼▼ 1-2. V16.0 專家診斷雷達 (動態對時版) ▼▼▼", df_v16_radar, custom_class="radar-table")
         show("▼▼▼ 2-1. 集保分級 - 張數表 (近10週) ▼▼▼", df_share_unit)
         show("▼▼▼ 2-2. 集保分級 - 人數表 (近10週) ▼▼▼", df_share_people)
         show("▼▼▼ 2-3. 集保分級 - 比例表 (%) ▼▼▼", df_share_pct)
@@ -813,9 +822,9 @@ if run_btn:
         show("▼▼▼ 24. CBAS 可轉債數據 [來源：FinMind] ▼▼▼", df_cbas)
 
         st.divider(); st.subheader("📋 【給 Gemini 的量化分析資料包】")
-        p = f"請幫我分析 {stock_id} 的量化籌碼。已套用 V15.3 專家雷達，大戶門檻與活籌碼槓桿已雙軸精算。\n\n"
+        p = f"請幫我分析 {stock_id} 的量化籌碼。已套用 V16.0 專家雷達，大戶門檻與活籌碼槓桿已雙軸精算。\n\n"
         p += format_to_gas(df_share_dynamic, "1-1. 雙軸活大戶鎖碼判定表 (C-Value)")
-        p += format_to_gas(df_v15_radar, "1-2. V15.3 專家診斷雷達")
+        p += format_to_gas(df_v16_radar, "1-2. V16.0 專家診斷雷達 (動態對時版)")
         p += format_to_gas(df_share_unit, "2-1. 集保分級 - 張數表")
         p += format_to_gas(df_share_people, "2-2. 集保分級 - 人數表")
         p += format_to_gas(df_share_pct, "2-3. 集保分級 - 比例表 (%)")
