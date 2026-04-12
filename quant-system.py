@@ -19,9 +19,10 @@ st.set_page_config(page_title="台股全息量化系統", layout="wide")
 # 內建最新 Sponsor Token
 FINMIND_TOKEN = "eyJ0eXAiOiJKV1QiLCJhbGciOiJIUzI1NiJ9.eyJkYXRlIjoiMjAyNi0wNC0xMCAyMDoyMDo0NiIsInVzZXJfaWQiOiJUb25lMSIsImVtYWlsIjoidG9uZWhzaWVAZ21haWwuY29tIiwiaXAiOiI2MS42Mi43LjE5OCJ9.7s3-IrkfdiUyTvGiZQGESBUBAPHQTnd4pwYcn8_J-CY"
 
-# 注入全局 CSS
+# 注入全局 CSS (強制所有表格內容不准換行，確保排版整齊)
 st.markdown("""
 <style>
+table.dataframe th, table.dataframe td { white-space: nowrap !important; }
 table.dataframe th { text-align: center !important; }
 table.radar-table td:last-child { text-align: left !important; }
 </style>
@@ -336,8 +337,8 @@ def process_tdcc(df):
     df['percent'] = pd.to_numeric(df['percent'], errors='coerce').fillna(0)
     df['unit'] = (pd.to_numeric(df.get('unit', 0), errors='coerce').fillna(0) / 1000).round().astype(int)
     
-    # 鎖定近8週資料
-    dates = sorted(df['date'].unique(), reverse=True)[:8]
+    # 放寬抓取到近15週，確保雷達計算差值時不會有NaN，輸出時再切回8週
+    dates = sorted(df['date'].unique(), reverse=True)[:15]
     df = df[df['date'].isin(dates)]
     df_levels = df[~df['LevelClean'].str.contains('合計|總計')]
     
@@ -493,7 +494,7 @@ def process_v24_ultimate_radar(df_wide, dead_chip_input, dynamic_dict, static_va
     df['V24_實戰診斷'] = df.apply(lambda row: get_expert_advice_v24(row, dead_chip_input, dynamic_dict, static_val), axis=1)
     
     report_columns = ['日期', '收盤價(元)', '總人數變動率(%)', '1000張變動(%)', '作戰區變動(%)', 'K_Value', 'V24_實戰診斷']
-    final_report = df[report_columns].sort_values('日期', ascending=False).fillna(0).head(8)
+    final_report = df[report_columns].sort_values('日期', ascending=False).fillna(0)
     
     return final_report
 
@@ -899,11 +900,7 @@ if run_btn:
                 styler = styler.set_properties(**{'text-align': 'right !important'}, subset=right_cols)
                 
                 if left_cols:
-                    styler = styler.set_properties(**{'text-align': 'left !important', 'white-space': 'nowrap'}, subset=left_cols)
-
-                date_cols = [c for c in df.columns if '日期' in str(c)]
-                if date_cols:
-                    styler = styler.set_properties(**{'white-space': 'nowrap'}, subset=date_cols)
+                    styler = styler.set_properties(**{'text-align': 'left !important'}, subset=left_cols)
 
                 try: styler = styler.hide(axis="index")
                 except: styler = styler.hide_index()
@@ -917,10 +914,10 @@ if run_btn:
                 if custom_class: html = html.replace('<table', f'<table class="{custom_class}"')
                 st.markdown(html, unsafe_allow_html=True)
             
-        show("▼▼▼ 1-1. 雙軸活大戶鎖碼判定表 (C-Value) (近8週) ▼▼▼", df_share_dynamic)
-        show("▼▼▼ 1-2. 專家診斷雷達 (近8週) ▼▼▼", df_v24_radar, custom_class="radar-table")
-        show("▼▼▼ 2-1. 集保分級 - 張數表 (近8週) ▼▼▼", df_share_unit)
-        show("▼▼▼ 2-2. 集保分級 - 人數表 (近8週) ▼▼▼", df_share_people)
+        show("▼▼▼ 1-1. 雙軸活大戶鎖碼判定表 (C-Value) (近8週) ▼▼▼", df_share_dynamic.head(8))
+        show("▼▼▼ 1-2. 專家診斷雷達 (近8週) ▼▼▼", df_v24_radar.head(8), custom_class="radar-table")
+        show("▼▼▼ 2-1. 集保分級 - 張數表 (近8週) ▼▼▼", df_share_unit.head(8))
+        show("▼▼▼ 2-2. 集保分級 - 人數表 (近8週) ▼▼▼", df_share_people.head(8))
         
         if df_twse.empty:
             st.markdown(f"#### ▼▼▼ 3. 鉅額交易明細 (近3日) [來源：證交所/櫃買中心] ▼▼▼")
@@ -964,10 +961,10 @@ if run_btn:
             name_str = f" {stock_name}" if stock_name else ""
             p = f"請依下面最新的盤後資料幫我分析 {user_stock_id}{name_str} 的量化籌碼，必須以我給的資料優先使用。\n\n"
             
-            p += format_to_gas(df_share_dynamic, "1-1. 雙軸活大戶鎖碼判定表 (C-Value) (近8週)")
-            p += format_to_gas(df_v24_radar, "1-2. 專家診斷雷達 (近8週)")
-            p += format_to_gas(df_share_unit, "2-1. 集保分級 - 張數表 (近8週)")
-            p += format_to_gas(df_share_people, "2-2. 集保分級 - 人數表 (近8週)")
+            p += format_to_gas(df_share_dynamic.head(8), "1-1. 雙軸活大戶鎖碼判定表 (C-Value) (近8週)")
+            p += format_to_gas(df_v24_radar.head(8), "1-2. 專家診斷雷達 (近8週)")
+            p += format_to_gas(df_share_unit.head(8), "2-1. 集保分級 - 張數表 (近8週)")
+            p += format_to_gas(df_share_people.head(8), "2-2. 集保分級 - 人數表 (近8週)")
             p += format_to_gas(df_twse, "3. 鉅額交易明細 (近3日)")
             p += format_to_gas(df_margin, "4. 散戶資券餘額 (近10天)")
             p += format_to_gas(df_day_trade, "5. 現股當沖明細 (近10天)")
