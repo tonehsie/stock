@@ -199,6 +199,7 @@ def get_dead_chip_info(date_str, dead_chip_input, dynamic_dict, static_val, chip
 # ==========================================
 @st.cache_data(ttl=3600, show_spinner=False)
 def scrape_block_trades(target_id, actual_dates):
+    if not actual_dates: return pd.DataFrame(), []
     target_dates = actual_dates[:3] 
     block_data = []
     debug_log = []
@@ -335,10 +336,12 @@ def process_tdcc(df):
     df['percent'] = pd.to_numeric(df['percent'], errors='coerce').fillna(0)
     df['unit'] = (pd.to_numeric(df.get('unit', 0), errors='coerce').fillna(0) / 1000).round().astype(int)
     
-    # 修改為近8週
+    # 鎖定近8週資料
     dates = sorted(df['date'].unique(), reverse=True)[:8]
     df = df[df['date'].isin(dates)]
     df_levels = df[~df['LevelClean'].str.contains('合計|總計')]
+    
+    if df_levels.empty: return pd.DataFrame(), pd.DataFrame(), pd.DataFrame()
     
     p_unit = df_levels.pivot_table(index='date', columns='LevelClean', values='unit', aggfunc='first').reset_index().fillna(0)
     p_people = df_levels.pivot_table(index='date', columns='LevelClean', values='people', aggfunc='first').reset_index().fillna(0)
@@ -365,7 +368,9 @@ def process_tdcc(df):
     df_unit = pd.merge(df_total[['date', '總張數']], p_unit[['date']+lvls], on='date').rename(columns={'date': '日期'}).sort_values('日期', ascending=False)
     df_people = pd.merge(df_total[['date', '總人數(人)']], p_people[['date']+lvls], on='date').rename(columns={'date': '日期'}).sort_values('日期', ascending=False)
     
-    df_wide.columns = list(df_wide.columns); df_unit.columns = list(df_unit.columns); df_people.columns = list(df_people.columns)
+    df_wide.columns = list(df_wide.columns)
+    df_unit.columns = list(df_unit.columns)
+    df_people.columns = list(df_people.columns)
     
     return df_wide, df_unit, df_people
 
@@ -488,7 +493,6 @@ def process_v24_ultimate_radar(df_wide, dead_chip_input, dynamic_dict, static_va
     df['V24_實戰診斷'] = df.apply(lambda row: get_expert_advice_v24(row, dead_chip_input, dynamic_dict, static_val), axis=1)
     
     report_columns = ['日期', '收盤價(元)', '總人數變動率(%)', '1000張變動(%)', '作戰區變動(%)', 'K_Value', 'V24_實戰診斷']
-    # 改為抓取近8週
     final_report = df[report_columns].sort_values('日期', ascending=False).fillna(0).head(8)
     
     return final_report
@@ -503,7 +507,6 @@ def process_price(df):
     df_out['Trading_Volume'] = (pd.to_numeric(df_out['Trading_Volume'], errors='coerce').fillna(0) / 1000).round().astype(int)
     df_out = df_out.rename(columns={"date":"日期","Trading_Volume":"成交量(張)","Trading_money":"成交金額(千元)","open":"開盤價(元)","max":"最高價(元)","min":"最低價(元)","close":"收盤價(元)","spread":"漲跌(元)"})
     df_out["斷頭價(0.78)"] = (df_out["收盤價(元)"] * 0.78).round(2)
-    # 取全部排序，後續顯示時取10天
     df_res = df_out[['日期','成交量(張)','開盤價(元)','最高價(元)','最低價(元)','收盤價(元)','漲跌(元)','斷頭價(0.78)']].sort_values('日期', ascending=False)
     df_res.columns = list(df_res.columns)
     return df_res
@@ -524,7 +527,6 @@ def process_day_trading(df):
             df_out = df_out.drop(columns=[col])
     
     cols = ['日期'] + [c for c in df_out.columns if '張數' in c or '率' in c]
-    # 改為10天
     df_res = df_out[cols].tail(10).sort_values('日期', ascending=False)
     df_res.columns = list(df_res.columns)
     return df_res
@@ -540,6 +542,7 @@ def fetch_single_day_branch(d, target_id):
 
 @st.cache_data(ttl=3600, show_spinner=False)
 def fetch_fm_branch_fast_parallel(dates_list, target_id):
+    if not dates_list: return pd.DataFrame()
     all_data = []
     with concurrent.futures.ThreadPoolExecutor(max_workers=10) as executor:
         f_to_d = {executor.submit(fetch_single_day_branch, d, target_id): d for d in dates_list}
@@ -548,9 +551,8 @@ def fetch_fm_branch_fast_parallel(dates_list, target_id):
     return pd.DataFrame(all_data)
 
 def process_branch_diff(df_raw, actual_dates):
-    if df_raw.empty: return pd.DataFrame()
+    if df_raw.empty or not actual_dates: return pd.DataFrame()
     out = []
-    # 改為10天
     for d in actual_dates[:10]:
         df_day = df_raw[df_raw['date'] == d]
         if df_day.empty: continue
@@ -710,7 +712,6 @@ def process_margin(df):
     df['融資增減(萬元)'] = df['融資餘額(萬元)'] - df.get('MarginPurchaseYesterdayBalance', 0)
     df['融券增減(張)'] = df['融券餘額(張)'] - df.get('ShortSaleYesterdayBalance', 0)
     
-    # 改為10天
     df_res = df[['日期','融資買進(萬元)','融資賣出(萬元)','融資現償(萬元)','融資餘額(萬元)','融資增減(萬元)','融券買進(張)','融券賣出(張)','融券餘額(張)','融券增減(張)','資券相抵(張)']].tail(10).sort_values('日期', ascending=False)
     df_res.columns = list(df_res.columns)
     return df_res
@@ -729,7 +730,6 @@ def process_inst(df):
     d_sell = pd.to_numeric(pdf.get('sell_Dealer_self',0), errors='coerce').fillna(0) + pd.to_numeric(pdf.get('sell_Dealer_Hedging',0), errors='coerce').fillna(0)
     out['自營買賣超(張)'] = ((d_buy - d_sell) / 1000).round().astype(int)
     out['三大法人買賣超(張)'] = out['外資買賣超(張)'] + out['投信買賣超(張)'] + out['自營買賣超(張)']
-    # 改為10天
     df_res = out.tail(10).sort_values('日期', ascending=False)
     df_res.columns = list(df_res.columns)
     return df_res
@@ -741,7 +741,6 @@ def process_fut_inst(df):
     pdf.columns.name = None
     for col in ['Foreign_Investor', 'Investment_Trust', 'Dealer']:
         if col not in pdf.columns: pdf[col] = 0
-    # 改為10天
     df_res = pdf.rename(columns={'date': '日期', 'Foreign_Investor': '外資多空(口)', 'Investment_Trust': '投信多空(口)', 'Dealer': '自營多空(口)'}).tail(10).sort_values('日期', ascending=False)
     df_res.columns = list(df_res.columns)
     return df_res
@@ -750,7 +749,6 @@ def process_per(df):
     if df.empty: return pd.DataFrame()
     df_out = df.copy().rename(columns={"date":"日期","dividend_yield":"殖利率(%)","PER":"本益比(倍)","PBR":"淨值比(倍)"})
     for col in ["殖利率(%)", "本益比(倍)", "淨值比(倍)"]: df_out[col] = pd.to_numeric(df_out[col], errors='coerce').round(2)
-    # 改為10天
     df_res = df_out[['日期', '本益比(倍)', '淨值比(倍)', '殖利率(%)']].tail(10).sort_values('日期', ascending=False)
     df_res.columns = list(df_res.columns)
     return df_res
@@ -766,7 +764,6 @@ def process_div(df):
     if df.empty: return pd.DataFrame()
     df_out = df.rename(columns={"date": "公告日期", "year": "股利年份", "StockEarningsDistribution": "盈餘配股(元)", "StockStatutorySurplus": "公積配股(元)", "CashEarningsDistribution": "盈餘配息(元)", "CashStatutorySurplus": "公積配息(元)"})
     cols = [c for c in ["公告日期", "股利年份", "盈餘配息(元)", "公積配息(元)", "盈餘配股(元)", "公積配股(元)"] if c in df_out.columns]
-    # 改為5年
     df_res = df_out[cols].tail(5).sort_values('公告日期', ascending=False)
     df_res.columns = list(df_res.columns)
     return df_res
@@ -789,7 +786,7 @@ if run_btn:
         
         start_probe = (datetime.date.today() - datetime.timedelta(days=1095)).strftime("%Y-%m-%d")
         df_p_raw = fetch_fm("TaiwanStockPrice", start_probe, user_stock_id)
-        if df_p_raw.empty: st.error("查無股價資料"); st.stop()
+        if df_p_raw.empty: st.error("查無該檔股票近期的股價資料，請確認代號是否正確。"); st.stop()
         
         actual_dates = sorted(df_p_raw['date'].unique().tolist(), reverse=True)
         d_60 = actual_dates[59] if len(actual_dates) >= 60 else actual_dates[-1]
@@ -821,6 +818,8 @@ if run_btn:
             df_rev_raw['營收月份'] = df_rev_raw['revenue_year'].astype(str) + "-" + df_rev_raw['revenue_month'].astype(str).str.zfill(2)
             df_rev = df_rev_raw.rename(columns={"revenue":"月營收(百萬元)"})[['營收月份','月營收(百萬元)']].tail(24)
             df_rev['月營收(百萬元)'] = (df_rev['月營收(百萬元)']/1000000).round().astype(int)
+            # 確保營收表格也是把「最新月份」排序在最上面
+            df_rev = df_rev.sort_values('營收月份', ascending=False)
             df_rev.columns = list(df_rev.columns)
         
         df_b_today = process_branch_top15(df_branch_raw, 1, actual_dates)
