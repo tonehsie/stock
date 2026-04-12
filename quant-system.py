@@ -363,11 +363,16 @@ def process_tdcc(df):
     
     df_unit = pd.merge(df_total[['date', '總張數']], p_unit[['date']+lvls], on='date').rename(columns={'date': '日期'}).sort_values('日期', ascending=False)
     df_people = pd.merge(df_total[['date', '總人數(人)']], p_people[['date']+lvls], on='date').rename(columns={'date': '日期'}).sort_values('日期', ascending=False)
-    df_percent = p_pct[['date']+lvls].rename(columns={'date': '日期'}).sort_values('日期', ascending=False)
     
+    # 修改：替 2-3 比例表加上 (%) 標記，以觸發小數點渲染
+    df_percent = p_pct[['date']+lvls].rename(columns={'date': '日期'}).sort_values('日期', ascending=False)
+    df_percent = df_percent.rename(columns={l: f"{l}(%)" for l in lvls})
+    
+    # 修改：替 2-4 均張表加上 _均張 標記，以觸發小數點渲染
     df_avg_base = pd.DataFrame({'date': p_unit['date']})
     for l in lvls: df_avg_base[l] = (p_unit[l] / p_people[l].replace(0, np.nan)).fillna(0).round(2)
     df_avg = pd.merge(df_total[['date', '總均張']], df_avg_base, on='date').rename(columns={'date': '日期'}).sort_values('日期', ascending=False)
+    df_avg = df_avg.rename(columns={l: f"{l}_均張" for l in lvls})
     
     df_wide.columns = list(df_wide.columns); df_unit.columns = list(df_unit.columns); df_people.columns = list(df_people.columns)
     df_percent.columns = list(df_percent.columns); df_avg.columns = list(df_avg.columns)
@@ -835,7 +840,7 @@ if run_btn:
         df_opt_inst = process_opt_inst(fetch_fm("TaiwanOptionInstitutionalInvestors", d_60, "TXO"))
         
         # ==========================================
-        # 📌 智能防呆排版引擎 (已重構優先權邏輯)
+        # 📌 智能防呆排版引擎 (已補足 2-3 和 2-4 的欄位偵測)
         # ==========================================
         def show(title, df, custom_class=""):
             st.markdown(f"#### {title}")
@@ -869,10 +874,10 @@ if run_btn:
 
                 format_dict = {}
                 for c in df.columns:
-                    # 第一順位：確保明確需要小數點的指標 (包含總人數變動率)
-                    if any(kw in c for kw in ['率', '比', '價', '值', '報酬', 'C_Value', 'K_Value', 'C(%)', '變動', '佔比', '死籌碼', '億', '票面利率']):
+                    # 第一順位：確保明確需要小數點的指標 (包含總人數變動率、比例(%)、均張)
+                    if any(kw in c for kw in ['率', '比', '價', '值', '報酬', 'C_Value', 'K_Value', 'C(%)', '變動', '佔比', '死籌碼', '億', '票面利率', '(%)', '均張']):
                         format_dict[c] = fmt_float
-                    # 第二順位：明確為整數的單位 (包含期貨口數、選擇權千元、張數等)
+                    # 第二順位：明確為整數的單位
                     elif any(kw in c for kw in ['口', '張', '股', '人', '次', '家', '元', '額', '量']):
                         format_dict[c] = fmt_int
                     else:
