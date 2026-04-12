@@ -15,7 +15,7 @@ import urllib3
 urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
 
 # 設定網頁標題與佈局
-st.set_page_config(page_title="台股全息量化系統 (V24.1 終極防呆版)", layout="wide")
+st.set_page_config(page_title="台股全息量化系統 (V24.0 完美數學校正版)", layout="wide")
 
 # 內建最新 Sponsor Token
 FINMIND_TOKEN = "eyJ0eXAiOiJKV1QiLCJhbGciOiJIUzI1NiJ9.eyJkYXRlIjoiMjAyNi0wNC0xMCAyMDoyMDo0NiIsInVzZXJfaWQiOiJUb25lMSIsImVtYWlsIjoidG9uZWhzaWVAZ21haWwuY29tIiwiaXAiOiI2MS42Mi43LjE5OCJ9.7s3-IrkfdiUyTvGiZQGESBUBAPHQTnd4pwYcn8_J-CY"
@@ -29,9 +29,9 @@ table.radar-table td:last-child { text-align: left !important; }
 """, unsafe_allow_html=True)
 
 st.title("🤖 交易員實戰手冊：全息量化擷取系統")
-st.markdown("✅ **V24.1 鐵桿鎖碼雷達 (終極防呆版)** | ✅ **嚴謹對齊門檻** | ✅ **鉅額(3日)+排版滿血**")
+st.markdown("✅ **V24.0 鐵桿鎖碼雷達 (完美數學校正)** | ✅ **低價反分身+智能門檻** | ✅ **鉅額(3日)+排版滿血**")
 
-# UI 輸入區 (全交由智能引擎精算門檻)
+# UI 輸入區
 col1, col2 = st.columns([1, 1])
 with col1:
     stock_id = st.text_input("個股代號", value="1785")
@@ -48,7 +48,6 @@ st.divider()
 # ==========================================
 
 def get_stock_name(target_id):
-    """📌 自動抓取股票名稱，用於 Prompt"""
     try:
         res = requests.get(f"https://tw.stock.yahoo.com/quote/{target_id}.TW", headers={"User-Agent": "Mozilla/5.0"}, timeout=5)
         match = re.search(r'<title>(.*?)\s*\(', res.text)
@@ -57,7 +56,6 @@ def get_stock_name(target_id):
     return ""
 
 def safe_get_fubon(url):
-    """📌 對付富邦老舊 SSL 憑證的降級爬蟲器"""
     try:
         ctx = ssl.create_default_context()
         ctx.check_hostname = False
@@ -139,7 +137,7 @@ def scrape_director_holding(target_id):
                             except: pass
                     
                     if dynamic_dict:
-                        return dynamic_dict, latest_val, "Goodinfo(動態期間)", debug_log
+                        return dynamic_dict, latest_val, "Goodinfo", debug_log
     except Exception as e:
         debug_log.append(f"Goodinfo錯誤: {e}")
 
@@ -169,7 +167,7 @@ def scrape_director_holding(target_id):
                 
                 total_ratio = sum(entity_dict.values())
                 if 0 < total_ratio < 100.0:
-                    return {}, round(total_ratio, 2), "富邦(去重精算)", debug_log
+                    return {}, round(total_ratio, 2), "富邦精算", debug_log
     except Exception as e: 
         debug_log.append(f"富邦錯誤: {e}")
 
@@ -182,10 +180,10 @@ def get_dead_chip_info(date_str, dead_chip_input, dynamic_dict, static_val, chip
         
     month_key = str(date_str)[:7].replace('/', '-')
     if dynamic_dict and month_key in dynamic_dict:
-        return dynamic_dict[month_key], "Goodinfo當月"
+        return dynamic_dict[month_key], "Goodinfo"
         
     if dynamic_dict and len(dynamic_dict) > 0:
-        return list(dynamic_dict.values())[0], "Goodinfo最新"
+        return list(dynamic_dict.values())[0], "Goodinfo"
         
     if static_val > 0:
         return static_val, chip_engine
@@ -193,7 +191,7 @@ def get_dead_chip_info(date_str, dead_chip_input, dynamic_dict, static_val, chip
     return 0.0, "-"
 
 # ==========================================
-# 鉅額交易掃描 (3日掃描)
+# 鉅額交易掃描 (3日)
 # ==========================================
 def scrape_block_trades(target_id, actual_dates):
     target_dates = actual_dates[:3] 
@@ -295,26 +293,21 @@ def process_day_trading(df):
     return df_res
 
 # ==========================================
-# 📌 智能門檻計算引擎 (V24.1 嚴謹對齊版)
+# 📌 智能門檻計算引擎
 # ==========================================
 def get_smart_threshold(price, capital_bn, dead_float):
-    if pd.isna(price) or price <= 0: return 1000 # 防呆
-    
-    # A. 智能財力 (萬) & 智能影響力 (%)
+    if pd.isna(price) or price <= 0: return 1000
     sfc = max(3000, capital_bn * 500)
     si = max(0.1, 0.5 * (100 - dead_float) / 100)
     
-    # B. 轉換為物理張數
     shares_by_money = (sfc * 10000) / (price * 1000)
     shares_by_influence = (capital_bn * 10000) * (si / 100) 
     
     raw_threshold = max(shares_by_money, shares_by_influence)
     
-    # C. 統一對齊集保級距 (修復未對齊漏洞)
     levels = [100, 200, 400, 600, 800, 1000]
     aligned_threshold = min(levels, key=lambda x: abs(x - raw_threshold))
     
-    # D. 低價股反分身封頂
     if price < 30:
         return min(aligned_threshold, 400)
     
@@ -387,11 +380,25 @@ def process_branch_top15(df_raw, period_days, actual_dates):
     b_n, b_i, b_o, b_net, b_pct, s_n, s_i, s_o, s_net, s_pct = [], [], [], [], [], [], [], [], [], []
     for i in range(max_len):
         if i < len(buyers):
-            b_n.append(buyers.loc[i, 'securities_trader']); b_i.append(int(buyers.loc[i, 'buy'])); b_o.append(int(buyers.loc[i, 'sell'])); b_net.append(int(buyers.loc[i, 'net'])); b_pct.append(f"{round((buyers.loc[i, 'net']/total_vol)*100)}%")
-        else: b_n.append("-"); b_i.append(0); b_o.append(0); b_net.append(0); b_pct.append("-")
+            b_n.append(buyers.loc[i, 'securities_trader'])
+            b_i.append(int(buyers.loc[i, 'buy']))
+            b_o.append(int(buyers.loc[i, 'sell']))
+            b_net.append(int(buyers.loc[i, 'net']))
+            # 📌 修正為小數點後2位
+            b_pct.append(f"{(buyers.loc[i, 'net']/total_vol)*100:.2f}%")
+        else: 
+            b_n.append("-"); b_i.append(0); b_o.append(0); b_net.append(0); b_pct.append("-")
+            
         if i < len(sellers):
-            s_n.append(sellers.loc[i, 'securities_trader']); s_i.append(int(sellers.loc[i, 'buy'])); s_o.append(int(sellers.loc[i, 'sell'])); s_net.append(abs(int(sellers.loc[i, 'net']))); s_pct.append(f"{round((abs(sellers.loc[i, 'net'])/total_vol)*100)}%")
-        else: s_n.append("-"); s_i.append(0); s_o.append(0); s_net.append(0); s_pct.append("-")
+            s_n.append(sellers.loc[i, 'securities_trader'])
+            s_i.append(int(sellers.loc[i, 'buy']))
+            s_o.append(int(sellers.loc[i, 'sell']))
+            s_net.append(abs(int(sellers.loc[i, 'net'])))
+            # 📌 修正為小數點後2位
+            s_pct.append(f"{(abs(sellers.loc[i, 'net'])/total_vol)*100:.2f}%")
+        else: 
+            s_n.append("-"); s_i.append(0); s_o.append(0); s_net.append(0); s_pct.append("-")
+            
     out["買超分點"]=b_n; out["買進(張)"]=b_i; out["賣出(張)"]=b_o; out["買超(張)"]=b_net; out["佔比"]=b_pct
     out["賣超分點"]=s_n; out["買進(張)."]=s_i; out["賣出(張)."]=s_o; out["賣超(張)"]=s_net; out["佔比."]=s_pct
     out.columns = list(out.columns)
@@ -556,9 +563,6 @@ def process_tdcc(df):
     
     return df_wide, df_unit, df_people, df_percent, df_avg
 
-# ==========================================
-# 📌 1-1. 雙軸活大戶鎖碼判定表 (C-Value) 計算引擎
-# ==========================================
 def process_tdcc_dynamic(df_share_wide, df_price, dead_chip_input, dynamic_dict, static_val, chip_engine):
     if df_share_wide.empty or df_price.empty: return pd.DataFrame()
     
@@ -593,7 +597,8 @@ def process_tdcc_dynamic(df_share_wide, df_price, dead_chip_input, dynamic_dict,
         if 0 < current_dead_chip < 100:
             c_val = max(0, (l_pct - current_dead_chip) / (100.0 - current_dead_chip))
             status = "🔴 絕對控盤" if c_val >= 0.5 else "🟡 高度鎖碼" if c_val >= 0.3 else "🔵 初步集結" if c_val >= 0.15 else "⚪ 籌碼渙散"
-            c_display = round(c_val * 100, 1)
+            # 📌 修正為小數點後2位
+            c_display = round(c_val * 100, 2)
 
         out.append({
             "日期": d_str, 
@@ -601,7 +606,8 @@ def process_tdcc_dynamic(df_share_wide, df_price, dead_chip_input, dynamic_dict,
             "股本(億)": round(cap_bn, 2),
             "主導門檻": f"智能精算 ({int(ceiling_t)}張)",
             "級距總佔比(%)": round(l_pct, 2),
-            "死籌碼(%)": f"{current_dead_chip}% ({chip_label})" if current_dead_chip > 0 else "-",
+            # 📌 修正為小數點後2位
+            "死籌碼(%)": f"{float(current_dead_chip):.2f}% ({chip_label})" if current_dead_chip > 0 else "-",
             "活大戶影響力C(%)": c_display,
             "實戰判定": status
         })
@@ -626,28 +632,23 @@ def get_expert_advice_v24(row, dead_chip_input, dynamic_dict, static_val):
 
     price = row.get('收盤價(元)', 0)
 
-    # 💎 鐵桿鎖碼
+    # 📌 修正強度顯示為小數點後2位
     if 0 < price < 30 and row['1000張變動(%)'] >= 1.0:
-        advice.append(f"💎 [鐵桿鎖碼] 頂層真身大幅上揚，強度 {real_1000_change:.1f}%")
+        advice.append(f"💎 [鐵桿鎖碼] 頂層真身大幅上揚，強度 {real_1000_change:.2f}%")
 
-    # 💀 逃命警報
     if row['總人數變動率(%)'] > 2.0 and (real_1000_change < -0.5 or real_combat_change < -0.5):
-        advice.append(f"💀 [逃命警報] 散戶爆量接刀，活籌碼流出強度 {abs(max_intensity):.1f}%")
+        advice.append(f"💀 [逃命警報] 散戶爆量接刀，活籌碼流出強度 {abs(max_intensity):.2f}%")
         return " | ".join(advice) 
 
-    # 🚀 暴力軋空
     if max_intensity > 3.0 and row['總人數變動率(%)'] < 0:
-        advice.append(f"🚀 [暴力軋空] 活籌碼強勢壓縮 {max_intensity:.1f}%")
+        advice.append(f"🚀 [暴力軋空] 活籌碼強勢壓縮 {max_intensity:.2f}%")
 
-    # 🔴 分身集結
     if row.get('中實戶人數變動', 0) >= 2 and 200 <= row.get('K_Value', 0) <= 600:
         advice.append(f"🔴 [分身集結] 偵測到中層主力施工，K值({row['K_Value']})")
 
-    # 🔥 定員增持
     if row.get('中實戶人數變動', -1) == 0 and real_combat_change >= 0.5:
         advice.append("🔥 [定員增持] 原班人馬持續加壓！")
 
-    # 🟣 惡意甩轎
     if row['總人數變動率(%)'] > 1.5 and real_1000_change >= -0.1 and real_combat_change >= -0.1:
         advice.append("🟣 [惡意甩轎] 散戶湧入但主力未退，刻意讓道洗盤")
 
@@ -672,17 +673,15 @@ def process_v24_ultimate_radar(df_wide, dead_chip_input, dynamic_dict, static_va
     df['核心區佔比(%)'] = df.get('400-600張_比例(%)',0) + df.get('600-800張_比例(%)',0) + df.get('800-1000張_比例(%)',0) + df.get('1000張以上_比例(%)',0)
     df['作戰區佔比(%)'] = df.get('200-400張_比例(%)',0) + df.get('400-600張_比例(%)',0) + df.get('600-800張_比例(%)',0)
     
-    # 📌 完美對齊變動量計算
     df['總人數變動率(%)'] = (df['總人數(人)'].pct_change() * 100).round(2)
     df['1000張變動(%)'] = df.get('1000張以上_比例(%)', pd.Series([0]*len(df))).diff().round(2)
     df['作戰區變動(%)'] = df['作戰區佔比(%)'].diff().round(2)
     df['中實戶人數變動'] = df['中實戶人數'].diff()
     df['中實戶張數變動'] = df['中實戶總數'].diff()
     
-    # 📌 避免除以零警告
     def calc_k(row):
         if row['中實戶人數變動'] >= 2 and row['中實戶張數變動'] > 0:
-            return round(row['中實戶張數變動'] / row['中實戶人數變動'], 1)
+            return round(row['中實戶張數變動'] / row['中實戶人數變動'], 2)
         return 0.0
     df['K_Value'] = df.apply(calc_k, axis=1)
     
@@ -782,7 +781,7 @@ def process_cbas(df):
 # 執行主引擎
 # ==========================================
 if run_btn:
-    with st.spinner(f"正在擷取 {stock_id} 數據，並啟動 V24.1 終極無瑕校正雷達..."):
+    with st.spinner(f"正在擷取 {stock_id} 數據，並啟動 V24.0 終極無瑕校正雷達..."):
         
         stock_name = get_stock_name(stock_id)
         
@@ -797,13 +796,8 @@ if run_btn:
         
         dynamic_dict, static_val, chip_engine, debug_log = scrape_director_holding(stock_id)
         
-        if dead_chip_input and str(dead_chip_input).strip() != "":
-            st.toast("🤖 死籌碼：使用手動輸入數值", icon="✅")
-        elif len(dynamic_dict) > 0:
-            st.toast(f"🤖 死籌碼引擎：成功啟動 Goodinfo 動態對時", icon="🎯")
-        elif static_val > 0:
-            st.toast(f"🤖 死籌碼引擎：啟動 [{chip_engine}] 備援，數值 {static_val}%", icon="🛡️")
-        else:
+        # 📌 移除無用的吐司提示，僅保留錯誤阻擋時的警告
+        if not (dead_chip_input and str(dead_chip_input).strip() != "") and len(dynamic_dict) == 0 and static_val == 0:
             st.error(f"⚠️ 死籌碼引擎全滅！可能遭防火牆阻擋。連線紀錄: {', '.join(debug_log)}。請於上方手動輸入死籌碼！")
 
         df_branch_raw = fetch_fm_branch_fast_parallel(actual_dates[:60])
@@ -851,7 +845,7 @@ if run_btn:
         df_cbas = process_cbas(df_cbas_raw[df_cbas_raw['cb_id'].astype(str).str.startswith(stock_id)]) if not df_cbas_raw.empty else pd.DataFrame()
         df_opt_inst = process_opt_inst(fetch_fm("TaiwanOptionInstitutionalInvestors", d_60, specific_id=False, target_id="TXO"))
 
-        st.success("✅ V24.1 引擎運算完畢！數學邏輯完美校正。")
+        st.success("✅ V24.0 引擎運算完畢！數學邏輯完美校正。")
         
         # 📌 智能防呆排版引擎
         def show(title, df, custom_class=""):
@@ -915,7 +909,7 @@ if run_btn:
                 st.markdown(html, unsafe_allow_html=True)
             
         show("▼▼▼ 1-1. 雙軸活大戶鎖碼判定表 (C-Value) ▼▼▼", df_share_dynamic)
-        show("▼▼▼ 1-2. V24.1 專家診斷雷達 (終極數學校正版) ▼▼▼", df_v24_radar, custom_class="radar-table")
+        show("▼▼▼ 1-2. V24.0 專家診斷雷達 (終極數學校正版) ▼▼▼", df_v24_radar, custom_class="radar-table")
         show("▼▼▼ 2-1. 集保分級 - 張數表 (近10週) ▼▼▼", df_share_unit)
         show("▼▼▼ 2-2. 集保分級 - 人數表 (近10週) ▼▼▼", df_share_people)
         show("▼▼▼ 2-3. 集保分級 - 比例表 (%) ▼▼▼", df_share_pct)
@@ -923,6 +917,7 @@ if run_btn:
         
         if df_twse.empty:
             st.markdown(f"#### ▼▼▼ 3. 鉅額交易明細 (近3日) [來源：證交所/櫃買中心] ▼▼▼")
+            # 只有發生錯誤阻擋時才顯示日誌
             err_msg = ", ".join(twse_log) if twse_log else "本檔股票近 3 營業日無鉅額交易紀錄"
             st.warning(err_msg)
         else:
@@ -953,7 +948,7 @@ if run_btn:
         show("▼▼▼ 19. 台指期貨三大法人未平倉 (大盤) [來源：FinMind] ▼▼▼", df_fut)
         show("▼▼▼ 20. 台指選擇權三大法人未平倉 (大盤) [來源：FinMind] ▼▼▼", df_opt_inst)
         show("▼▼▼ 21. 歷年股利 [來源：FinMind] ▼▼▼", df_div)
-        show("▼▼▼ 22. 本益比、淨值比與殖 বাংলাকে [來源：FinMind] ▼▼▼", df_per)
+        show("▼▼▼ 22. 本益比、淨值比與殖利率 [來源：FinMind] ▼▼▼", df_per)
         show("▼▼▼ 23. 處置有價證券狀態 [來源：FinMind] ▼▼▼", df_disp)
         show("▼▼▼ 24. CBAS 可轉債數據 [來源：FinMind] ▼▼▼", df_cbas)
 
@@ -963,7 +958,7 @@ if run_btn:
         p = f"請依下面最新的盤後資料幫我分析 {stock_id}{name_str} 的量化籌碼，必須以我給的資料優先使用。\n\n"
         
         p += format_to_gas(df_share_dynamic, "1-1. 雙軸活大戶鎖碼判定表 (C-Value)")
-        p += format_to_gas(df_v24_radar, "1-2. V24.1 專家診斷雷達 (終極防呆版)")
+        p += format_to_gas(df_v24_radar, "1-2. V24.0 專家診斷雷達 (完美數學校正)")
         p += format_to_gas(df_share_unit, "2-1. 集保分級 - 張數表")
         p += format_to_gas(df_share_people, "2-2. 集保分級 - 人數表")
         p += format_to_gas(df_share_pct, "2-3. 集保分級 - 比例表 (%)")
