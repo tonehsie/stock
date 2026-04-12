@@ -15,7 +15,7 @@ import urllib3
 urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
 
 # 設定網頁標題與佈局
-st.set_page_config(page_title="台股全息量化系統 (V23.0 終極完美版)", layout="wide")
+st.set_page_config(page_title="台股全息量化系統 (V23.1 防呆修復版)", layout="wide")
 
 # 內建最新 Sponsor Token
 FINMIND_TOKEN = "eyJ0eXAiOiJKV1QiLCJhbGciOiJIUzI1NiJ9.eyJkYXRlIjoiMjAyNi0wNC0xMCAyMDoyMDo0NiIsInVzZXJfaWQiOiJUb25lMSIsImVtYWlsIjoidG9uZWhzaWVAZ21haWwuY29tIiwiaXAiOiI2MS42Mi43LjE5OCJ9.7s3-IrkfdiUyTvGiZQGESBUBAPHQTnd4pwYcn8_J-CY"
@@ -29,7 +29,7 @@ table.radar-table td:last-child { text-align: left !important; }
 """, unsafe_allow_html=True)
 
 st.title("🤖 交易員實戰手冊：全息量化擷取系統")
-st.markdown("✅ **V23.0 鐵桿鎖碼雷達** | ✅ **低價反分身+智能門檻** | ✅ **鉅額(3日)+神盾排版**")
+st.markdown("✅ **V23.1 鐵桿鎖碼雷達** | ✅ **低價反分身+智能門檻** | ✅ **鉅額(3日)+神盾排版**")
 
 # UI 輸入區 (全交由智能引擎精算門檻)
 col1, col2 = st.columns([1, 1])
@@ -195,7 +195,7 @@ def get_dead_chip_info(date_str, dead_chip_input, dynamic_dict, static_val, chip
     return 0.0, "-"
 
 # ==========================================
-# 鉅額交易掃描 (🎯 縮時為3日)
+# 鉅額交易掃描 (3日掃描)
 # ==========================================
 def scrape_block_trades(target_id, actual_dates):
     target_dates = actual_dates[:3] 
@@ -316,7 +316,7 @@ def get_smart_threshold(price, capital_bn, dead_float):
         return min(levels, key=lambda x: abs(x - raw_threshold))
 
 # ==========================================
-# 📌 收盤價處理函式 (已確認修復補回！)
+# 📌 收盤價處理函式
 # ==========================================
 def process_price(df):
     if df.empty: return pd.DataFrame()
@@ -571,7 +571,7 @@ def process_tdcc_dynamic(df_share, df_price, dead_chip_input, dynamic_dict, stat
         total_units = row.get('總張數', 0)
         cap_bn = total_units / 10000 
         
-        # 📌 調用智能門檻 (V22 鐵桿反分身邏輯)
+        # 📌 調用智能門檻 (V23.0 鐵桿反分身邏輯)
         ceiling_t = get_smart_threshold(p, cap_bn, current_dead_chip)
         
         l_cols = []
@@ -605,7 +605,7 @@ def process_tdcc_dynamic(df_share, df_price, dead_chip_input, dynamic_dict, stat
     return out_df
 
 # ==========================================
-# 📌 1-2. V23.0 專家診斷引擎 (鐵桿鎖碼)
+# 📌 1-2. V23.0 專家診斷引擎 (終極鐵桿鎖碼)
 # ==========================================
 def get_expert_advice_v23(row, dead_chip_input, dynamic_dict, static_val):
     advice = []
@@ -764,9 +764,8 @@ def process_cbas(df):
 # 執行主引擎
 # ==========================================
 if run_btn:
-    with st.spinner(f"正在擷取 {stock_id} 數據，並啟動 V23.0 完美雷達..."):
+    with st.spinner(f"正在擷取 {stock_id} 數據，並啟動 V23.1 完美防呆雷達..."):
         
-        # 📌 自動抓取股票名稱
         stock_name = get_stock_name(stock_id)
         
         start_probe = (datetime.date.today() - datetime.timedelta(days=1095)).strftime("%Y-%m-%d")
@@ -776,10 +775,8 @@ if run_btn:
         actual_dates = sorted(df_p_raw['date'].unique().tolist(), reverse=True)
         d_60 = actual_dates[59] if len(actual_dates) >= 60 else actual_dates[-1]
         
-        # 📌 [修復重點] 正確呼叫 process_price
         df_price = process_price(df_p_raw)
         
-        # 📌 執行死籌碼多重爬蟲引擎
         dynamic_dict, static_val, chip_engine, debug_log = scrape_director_holding(stock_id)
         
         if dead_chip_input and str(dead_chip_input).strip() != "":
@@ -836,22 +833,48 @@ if run_btn:
         df_cbas = process_cbas(df_cbas_raw[df_cbas_raw['cb_id'].astype(str).str.startswith(stock_id)]) if not df_cbas_raw.empty else pd.DataFrame()
         df_opt_inst = process_opt_inst(fetch_fm("TaiwanOptionInstitutionalInvestors", d_60, specific_id=False, target_id="TXO"))
 
-        st.success("✅ V23.0 引擎運算完畢！所有函數皆已確認正常執行。")
+        st.success("✅ V23.1 引擎運算完畢！所有函數皆已確認正常執行。")
         
-        # 📌 智能排版與格式化引擎 (數字靠右、文字靠左)
+        # 📌 智能排版與格式化引擎 (加上 Try-Except 防呆)
         def show(title, df, custom_class=""):
             st.markdown(f"#### {title}")
             if df is None or df.empty: 
                 st.warning("此區塊查無數據或無發行紀錄")
             else:
+                def fmt_int(x):
+                    if pd.isna(x): return "-"
+                    s = str(x).strip()
+                    if s == "-" or s == "": return "-"
+                    is_pct = "%" in s
+                    try:
+                        v = float(s.replace(",", "").replace("%", ""))
+                        return f"{int(v):,}" + ("%" if is_pct else "")
+                    except: return str(x)
+                    
+                def fmt_float(x):
+                    if pd.isna(x): return "-"
+                    s = str(x).strip()
+                    if s == "-" or s == "": return "-"
+                    is_pct = "%" in s
+                    try:
+                        v = float(s.replace(",", "").replace("%", ""))
+                        return f"{v:,.2f}" + ("%" if is_pct else "")
+                    except: return str(x)
+
+                def fmt_auto(x):
+                    if pd.isna(x): return "-"
+                    if isinstance(x, (int, np.integer)): return f"{int(x):,}"
+                    if isinstance(x, (float, np.floating)): return f"{float(x):,.2f}"
+                    return str(x)
+
                 format_dict = {}
                 for c in df.columns:
                     if any(kw in c for kw in ['人數', '張數', '股數', '口', '次數', '家數', '金額', '量']):
-                        format_dict[c] = lambda x: "-" if pd.isna(x) else f"{int(float(x)):,}"
+                        format_dict[c] = fmt_int
                     elif any(kw in c for kw in ['比', '價', '率', '值', '報酬', 'C(%)']):
-                        format_dict[c] = lambda x: "-" if pd.isna(x) else f"{float(x):,.2f}"
+                        format_dict[c] = fmt_float
                     else:
-                        format_dict[c] = lambda x: "-" if pd.isna(x) else (f"{float(x):,.2f}" if isinstance(x, (float, np.floating)) else (f"{int(x):,}" if isinstance(x, (int, np.integer)) else str(x)))
+                        format_dict[c] = fmt_auto
 
                 left_cols = [c for c in df.columns if any(kw in str(c) for kw in ['分點', '名稱', '姓名', '身份別', '質權人', '交易別', '診斷', '判定', '門檻', '條件', '措施', '契約', '代號', '來源'])]
                 right_cols = [c for c in df.columns if c not in left_cols]
@@ -874,7 +897,7 @@ if run_btn:
                 st.markdown(html, unsafe_allow_html=True)
             
         show("▼▼▼ 1-1. 雙軸活大戶鎖碼判定表 (C-Value) ▼▼▼", df_share_dynamic)
-        show("▼▼▼ 1-2. V23.0 專家診斷雷達 (排版滿血版) ▼▼▼", df_v23_radar, custom_class="radar-table")
+        show("▼▼▼ 1-2. V23.1 專家診斷雷達 (防呆滿血版) ▼▼▼", df_v23_radar, custom_class="radar-table")
         show("▼▼▼ 2-1. 集保分級 - 張數表 (近10週) ▼▼▼", df_share_unit)
         show("▼▼▼ 2-2. 集保分級 - 人數表 (近10週) ▼▼▼", df_share_people)
         show("▼▼▼ 2-3. 集保分級 - 比例表 (%) ▼▼▼", df_share_pct)
@@ -923,7 +946,7 @@ if run_btn:
         p = f"請依下面最新的盤後資料幫我分析 {stock_id}{name_str} 的量化籌碼，必須以我給的資料優先使用。\n\n"
         
         p += format_to_gas(df_share_dynamic, "1-1. 雙軸活大戶鎖碼判定表 (C-Value)")
-        p += format_to_gas(df_v23_radar, "1-2. V23.0 專家診斷雷達 (終極智能版)")
+        p += format_to_gas(df_v23_radar, "1-2. V23.1 專家診斷雷達 (防呆滿血版)")
         p += format_to_gas(df_share_unit, "2-1. 集保分級 - 張數表")
         p += format_to_gas(df_share_people, "2-2. 集保分級 - 人數表")
         p += format_to_gas(df_share_pct, "2-3. 集保分級 - 比例表 (%)")
