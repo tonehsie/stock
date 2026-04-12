@@ -15,21 +15,13 @@ import urllib3
 urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
 
 # 設定網頁標題與佈局
-st.set_page_config(page_title="台股全息量化系統 (V19.0 最終視覺優化版)", layout="wide")
+st.set_page_config(page_title="台股全息量化系統 (V20.0 終極無瑕版)", layout="wide")
 
 # 內建最新 Sponsor Token
 FINMIND_TOKEN = "eyJ0eXAiOiJKV1QiLCJhbGciOiJIUzI1NiJ9.eyJkYXRlIjoiMjAyNi0wNC0xMCAyMDoyMDo0NiIsInVzZXJfaWQiOiJUb25lMSIsImVtYWlsIjoidG9uZWhzaWVAZ21haWwuY29tIiwiaXAiOiI2MS42Mi43LjE5OCJ9.7s3-IrkfdiUyTvGiZQGESBUBAPHQTnd4pwYcn8_J-CY"
 
-# 📌 注入全局 CSS
-st.markdown("""
-<style>
-table.dataframe th { text-align: center !important; }
-table.radar-table td:last-child { text-align: left !important; }
-</style>
-""", unsafe_allow_html=True)
-
 st.title("🤖 交易員實戰手冊：全息量化擷取系統")
-st.markdown("✅ **V19.0 專家雷達** | ✅ **智能分流對齊 (字左數右)** | ✅ **雙引擎神盾 (Goodinfo/富邦)**")
+st.markdown("✅ **V20.0 專家雷達** | ✅ **智能分流對齊 (字左數右)** | ✅ **雙引擎神盾 (Goodinfo/富邦)**")
 
 # UI 輸入區
 col1, col2, col3, col4 = st.columns([1, 1, 1, 1])
@@ -103,10 +95,12 @@ def format_pledge_to_gas(df_summary, df_detail):
     return format_to_gas(df_summary, "18. 董監大股東質設 (餘額與斷頭預警)") + format_to_gas(df_detail, "董監大股東質設 (異動明細)")
 
 def scrape_director_holding(target_id):
-    """📌 V19.0 淨化版死籌碼引擎：只保留 Goodinfo 與 富邦"""
+    """📌 V20.0 淨化版死籌碼引擎：只保留 Goodinfo 與 富邦"""
     headers = {"User-Agent": "Mozilla/5.0"}
     debug_log = []
     dynamic_dict = {}
+    static_val = 0.0
+    chip_engine = "失敗"
 
     # 📌 優先權 1：Goodinfo (抓取歷史月份變化)
     try:
@@ -586,9 +580,9 @@ def process_tdcc_dynamic(df_share, df_price, dead_chip_input, dynamic_dict, stat
     return out_df
 
 # ==========================================
-# 📌 1-2. V19.0 專家診斷引擎
+# 📌 1-2. V20.0 專家診斷引擎
 # ==========================================
-def get_expert_advice_v19(row, dead_chip_input, dynamic_dict, static_val):
+def get_expert_advice_v20(row, dead_chip_input, dynamic_dict, static_val):
     advice = []
     if pd.isna(row['1000張變動(%)']): return "⚪ 數據初始化..."
     
@@ -624,7 +618,7 @@ def get_expert_advice_v19(row, dead_chip_input, dynamic_dict, static_val):
 
     return " | ".join(advice) if advice else "🔵 趨勢盤整/無明顯訊號"
 
-def process_v19_ultimate_radar(df_wide, dead_chip_input, dynamic_dict, static_val, df_price):
+def process_v20_ultimate_radar(df_wide, dead_chip_input, dynamic_dict, static_val, df_price):
     if df_wide.empty or len(df_wide) < 2: return pd.DataFrame()
     
     df = df_wide.sort_values('日期', ascending=True).copy()
@@ -656,9 +650,9 @@ def process_v19_ultimate_radar(df_wide, dead_chip_input, dynamic_dict, static_va
     
     df['K_Value'] = np.where(df['中實戶人數變動'] > 0, (df['中實戶張數變動'] / df['中實戶人數變動']).round(1), 0.0)
     
-    df['V19_實戰診斷'] = df.apply(lambda row: get_expert_advice_v19(row, dead_chip_input, dynamic_dict, static_val), axis=1)
+    df['V20_實戰診斷'] = df.apply(lambda row: get_expert_advice_v20(row, dead_chip_input, dynamic_dict, static_val), axis=1)
     
-    report_columns = ['日期', '收盤價(元)', '總人數變動率(%)', '1000張變動(%)', '作戰區變動(%)', 'K_Value', 'V19_實戰診斷']
+    report_columns = ['日期', '收盤價(元)', '總人數變動率(%)', '1000張變動(%)', '作戰區變動(%)', 'K_Value', 'V20_實戰診斷']
     final_report = df[report_columns].sort_values('日期', ascending=False).fillna(0).head(10)
     final_report.columns = list(final_report.columns)
     return final_report
@@ -765,7 +759,7 @@ def process_cbas(df):
 # 執行主引擎
 # ==========================================
 if run_btn:
-    with st.spinner(f"正在擷取 {stock_id} 數據，並啟動 V19.0 視覺優化雷達..."):
+    with st.spinner(f"正在擷取 {stock_id} 數據，並啟動 V20.0 視覺優化雷達..."):
         
         # 📌 自動抓取股票名稱
         stock_name = get_stock_name(stock_id)
@@ -778,7 +772,7 @@ if run_btn:
         d_60 = actual_dates[59] if len(actual_dates) >= 60 else actual_dates[-1]
         df_price = process_price(df_p_raw)
         
-        # 📌 執行死籌碼多重爬蟲引擎
+        # 📌 執行死籌碼爬蟲引擎
         dynamic_dict, static_val, chip_engine, debug_log = scrape_director_holding(stock_id)
         
         if dead_chip_input and str(dead_chip_input).strip() != "":
@@ -797,7 +791,7 @@ if run_btn:
         df_share_wide, df_share_unit, df_share_people, df_share_pct, df_share_avg = process_tdcc(df_share_raw)
         
         df_share_dynamic = process_tdcc_dynamic(df_share_wide, df_price, dead_chip_input, dynamic_dict, static_val, chip_engine, money_input, influence_input)
-        df_v19_radar = process_v19_ultimate_radar(df_share_wide, dead_chip_input, dynamic_dict, static_val, df_price)
+        df_v20_radar = process_v20_ultimate_radar(df_share_wide, dead_chip_input, dynamic_dict, static_val, df_price)
         
         df_twse, twse_log = scrape_block_trades(stock_id, actual_dates)
         df_margin = process_margin(fetch_fm("TaiwanStockMarginPurchaseShortSale", d_60))
@@ -835,29 +829,39 @@ if run_btn:
         df_cbas = process_cbas(df_cbas_raw[df_cbas_raw['cb_id'].astype(str).str.startswith(stock_id)]) if not df_cbas_raw.empty else pd.DataFrame()
         df_opt_inst = process_opt_inst(fetch_fm("TaiwanOptionInstitutionalInvestors", d_60, specific_id=False, target_id="TXO"))
 
-        st.success("✅ V19.0 引擎運算完畢！字左數右完美對齊，多餘引擎已剔除。")
+        st.success("✅ V20.0 引擎運算完畢！字左數右完美對齊，多餘引擎已剔除。")
         
+        # 📌 智能排版引擎：使用 Pandas Styler 原生支援，放棄危險的正則 HTML 掃描
         def show(title, df, custom_class=""):
             st.markdown(f"#### {title}")
             if df is None or df.empty: 
                 st.warning("此區塊查無數據或無發行紀錄")
-            else: 
-                html = df.to_html(classes=f'dataframe {custom_class}'.strip(), index=False, border=1)
+            else:
+                # 判斷哪些欄位是純文字，需要靠左
+                left_cols = [c for c in df.columns if any(kw in str(c) for kw in ['分點', '名稱', '姓名', '身份別', '質權人', '交易別', '診斷', '判定', '門檻', '條件', '措施', '契約', '代號', '來源'])]
+                right_cols = [c for c in df.columns if c not in left_cols]
+
+                # 套用 Pandas Styler
+                styler = df.style.set_properties(**{'text-align': 'right !important'}, subset=right_cols)
+                if left_cols:
+                    styler = styler.set_properties(**{'text-align': 'left !important'}, subset=left_cols)
+
+                # 隱藏 Index 並將 Header 置中
+                try: styler = styler.hide(axis="index")
+                except: styler = styler.hide_index()
                 
-                # 📌 智能排版引擎：純數字/日期/百分比靠右，其餘純文字(包含券商名稱)靠左
-                def align_td(match):
-                    content = match.group(1).strip()
-                    # 匹配: 數字(含千分位,小數,正負號)、百分比、單一橫線(-)、日期(YYYY/MM/DD或YYYY-MM-DD)、NaN
-                    if re.match(r'^[-+]?[\d,]+(\.\d+)?%?$|^\d{4}[-/]\d{2}[-/]\d{2}$|^-$|^NaN$', content):
-                        return f'<td style="text-align: right !important;">{content}</td>'
-                    else:
-                        return f'<td style="text-align: left !important;">{content}</td>'
+                styler = styler.set_table_styles([
+                    dict(selector='th', props=[('text-align', 'center !important')]),
+                    dict(selector='table', props=[('width', '100%')])
+                ])
                 
-                html = re.sub(r'<td>(.*?)</td>', align_td, html, flags=re.DOTALL)
+                # 產出乾淨 HTML
+                html = styler.to_html()
+                if custom_class: html = html.replace('<table', f'<table class="{custom_class}"')
                 st.markdown(html, unsafe_allow_html=True)
             
         show("▼▼▼ 1-1. 雙軸活大戶鎖碼判定表 (C-Value) ▼▼▼", df_share_dynamic)
-        show("▼▼▼ 1-2. V19.0 專家診斷雷達 (智能排版版) ▼▼▼", df_v19_radar, custom_class="radar-table")
+        show("▼▼▼ 1-2. V20.0 專家診斷雷達 (智能排版版) ▼▼▼", df_v20_radar, custom_class="radar-table")
         show("▼▼▼ 2-1. 集保分級 - 張數表 (近10週) ▼▼▼", df_share_unit)
         show("▼▼▼ 2-2. 集保分級 - 人數表 (近10週) ▼▼▼", df_share_people)
         show("▼▼▼ 2-3. 集保分級 - 比例表 (%) ▼▼▼", df_share_pct)
@@ -906,7 +910,7 @@ if run_btn:
         p = f"請依下面最新的盤後資料幫我分析 {stock_id}{name_str} 的量化籌碼，必須以我給的資料優先使用。\n\n"
         
         p += format_to_gas(df_share_dynamic, "1-1. 雙軸活大戶鎖碼判定表 (C-Value)")
-        p += format_to_gas(df_v19_radar, "1-2. V19.0 專家診斷雷達 (智能排版版)")
+        p += format_to_gas(df_v20_radar, "1-2. V20.0 專家診斷雷達 (智能排版版)")
         p += format_to_gas(df_share_unit, "2-1. 集保分級 - 張數表")
         p += format_to_gas(df_share_people, "2-2. 集保分級 - 人數表")
         p += format_to_gas(df_share_pct, "2-3. 集保分級 - 比例表 (%)")
