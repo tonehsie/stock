@@ -686,7 +686,7 @@ def scrape_fubon_pledge(df_price_raw, target_id):
     return df_sum_out, df_all
 
 # ==========================================
-# 📌 修正：融資為元(不除)，融券為張(不除)
+# 📌 修正：融資改名為(萬元)，數值維持原數不變
 # ==========================================
 def process_margin(df):
     if df.empty: return pd.DataFrame()
@@ -696,7 +696,7 @@ def process_margin(df):
     
     for c in margin_cols:
         if c in df.columns: 
-            # 融資：直接使用原數值(元)
+            # 融資：直接使用原數值(不除以任何數字)
             df[c] = pd.to_numeric(df[c], errors='coerce').fillna(0).round().astype(int)
             
     for c in short_cols:
@@ -706,20 +706,20 @@ def process_margin(df):
             
     df = df.rename(columns={
         "date":"日期",
-        "MarginPurchaseBuy":"融資買進(元)",
-        "MarginPurchaseSell":"融資賣出(元)",
-        "MarginPurchaseCashRepayment":"融資現償(元)",
-        "MarginPurchaseTodayBalance":"融資餘額(元)",
+        "MarginPurchaseBuy":"融資買進(萬元)",
+        "MarginPurchaseSell":"融資賣出(萬元)",
+        "MarginPurchaseCashRepayment":"融資現償(萬元)",
+        "MarginPurchaseTodayBalance":"融資餘額(萬元)",
         "ShortSaleBuy":"融券買進(張)",
         "ShortSaleSell":"融券賣出(張)",
         "ShortSaleTodayBalance":"融券餘額(張)",
         "OffsetLoanAndShort":"資券相抵(張)"
     })
     
-    df['融資增減(元)'] = df['融資餘額(元)'] - df.get('MarginPurchaseYesterdayBalance', 0)
+    df['融資增減(萬元)'] = df['融資餘額(萬元)'] - df.get('MarginPurchaseYesterdayBalance', 0)
     df['融券增減(張)'] = df['融券餘額(張)'] - df.get('ShortSaleYesterdayBalance', 0)
     
-    df_res = df[['日期','融資買進(元)','融資賣出(元)','融資現償(元)','融資餘額(元)','融資增減(元)','融券買進(張)','融券賣出(張)','融券餘額(張)','融券增減(張)','資券相抵(張)']].tail(15).sort_values('日期', ascending=False)
+    df_res = df[['日期','融資買進(萬元)','融資賣出(萬元)','融資現償(萬元)','融資餘額(萬元)','融資增減(萬元)','融券買進(張)','融券賣出(張)','融券餘額(張)','融券增減(張)','資券相抵(張)']].tail(15).sort_values('日期', ascending=False)
     df_res.columns = list(df_res.columns)
     return df_res
 
