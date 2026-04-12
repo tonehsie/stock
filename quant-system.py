@@ -366,7 +366,6 @@ def process_tdcc(df):
     df_percent = p_pct[['date']+lvls].rename(columns={'date': '日期'}).sort_values('日期', ascending=False)
     
     df_avg_base = pd.DataFrame({'date': p_unit['date']})
-    # 優化：使用 np.nan 取代 pd.NA 避免 Pandas 除法報錯
     for l in lvls: df_avg_base[l] = (p_unit[l] / p_people[l].replace(0, np.nan)).fillna(0).round(2)
     df_avg = pd.merge(df_total[['date', '總均張']], df_avg_base, on='date').rename(columns={'date': '日期'}).sort_values('日期', ascending=False)
     
@@ -544,7 +543,6 @@ def fetch_single_day_branch(d, target_id):
 @st.cache_data(ttl=3600, show_spinner=False)
 def fetch_fm_branch_fast_parallel(dates_list, target_id):
     all_data = []
-    # 移除會造成平行運算卡頓的 progress_bar，直接在背景高效執行
     with concurrent.futures.ThreadPoolExecutor(max_workers=10) as executor:
         f_to_d = {executor.submit(fetch_single_day_branch, d, target_id): d for d in dates_list}
         for f in concurrent.futures.as_completed(f_to_d):
@@ -836,7 +834,9 @@ if run_btn:
         df_cbas = process_cbas(df_cbas_raw[df_cbas_raw['cb_id'].astype(str).str.startswith(user_stock_id)]) if not df_cbas_raw.empty else pd.DataFrame()
         df_opt_inst = process_opt_inst(fetch_fm("TaiwanOptionInstitutionalInvestors", d_60, "TXO"))
         
-        # 智能防呆排版引擎
+        # ==========================================
+        # 📌 智能防呆排版引擎 (已重構優先權邏輯)
+        # ==========================================
         def show(title, df, custom_class=""):
             st.markdown(f"#### {title}")
             if df is None or df.empty: 
@@ -846,10 +846,9 @@ if run_btn:
                     if pd.isna(x): return "-"
                     s = str(x).strip()
                     if s == "-" or s == "": return "-"
-                    is_pct = "%" in s
                     try:
                         v = float(s.replace(",", "").replace("%", ""))
-                        return f"{int(v):,}" + ("%" if is_pct else "")
+                        return f"{int(v):,}"
                     except: return str(x)
                     
                 def fmt_float(x):
@@ -870,10 +869,12 @@ if run_btn:
 
                 format_dict = {}
                 for c in df.columns:
-                    if any(kw in c for kw in ['人數', '張數', '股數', '口', '次數', '家數', '金額', '量']):
-                        format_dict[c] = fmt_int
-                    elif any(kw in c for kw in ['比', '價', '率', '值', '報酬', 'C_Value(%)', 'C(%)']):
+                    # 第一順位：確保明確需要小數點的指標 (包含總人數變動率)
+                    if any(kw in c for kw in ['率', '比', '價', '值', '報酬', 'C_Value', 'K_Value', 'C(%)', '變動', '佔比', '死籌碼', '億', '票面利率']):
                         format_dict[c] = fmt_float
+                    # 第二順位：明確為整數的單位 (包含期貨口數、選擇權千元、張數等)
+                    elif any(kw in c for kw in ['口', '張', '股', '人', '次', '家', '元', '額', '量']):
+                        format_dict[c] = fmt_int
                     else:
                         format_dict[c] = fmt_auto
 
@@ -885,7 +886,6 @@ if run_btn:
                 if left_cols:
                     styler = styler.set_properties(**{'text-align': 'left !important'}, subset=left_cols)
 
-                # Pandas 防呆寫法相容處理
                 try: styler = styler.hide(axis="index")
                 except: styler = styler.hide_index()
                 
@@ -943,7 +943,6 @@ if run_btn:
 
         st.divider()
         
-        # 介面優化：使用 Expander 隱藏一大長串的 Prompt，避免佔用版面
         with st.expander("📋 【點擊展開：給 Gemini 的量化分析資料包 (直接複製)】", expanded=False):
             name_str = f" {stock_name}" if stock_name else ""
             p = f"請依下面最新的盤後資料幫我分析 {user_stock_id}{name_str} 的量化籌碼，必須以我給的資料優先使用。\n\n"
