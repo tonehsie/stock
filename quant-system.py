@@ -10,7 +10,7 @@ import urllib.request
 import ssl
 import urllib3
 
-# 📌 關閉所有憑證警告
+# 關閉所有憑證警告
 urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
 
 # 設定網頁標題與佈局
@@ -19,7 +19,7 @@ st.set_page_config(page_title="台股全息量化系統", layout="wide")
 # 內建最新 Sponsor Token
 FINMIND_TOKEN = "eyJ0eXAiOiJKV1QiLCJhbGciOiJIUzI1NiJ9.eyJkYXRlIjoiMjAyNi0wNC0xMCAyMDoyMDo0NiIsInVzZXJfaWQiOiJUb25lMSIsImVtYWlsIjoidG9uZWhzaWVAZ21haWwuY29tIiwiaXAiOiI2MS42Mi43LjE5OCJ9.7s3-IrkfdiUyTvGiZQGESBUBAPHQTnd4pwYcn8_J-CY"
 
-# 📌 注入全局 CSS
+# 注入全局 CSS
 st.markdown("""
 <style>
 table.dataframe th { text-align: center !important; }
@@ -43,11 +43,12 @@ run_btn = st.button("🚀 啟動引擎：擷取全息資料並產生 Prompt", us
 st.divider()
 
 # ==========================================
-# 工具函式與多重死籌碼引擎
+# 工具函式與多重死籌碼引擎 (加入快取優化效能)
 # ==========================================
 
+@st.cache_data(ttl=3600, show_spinner=False)
 def get_stock_name(target_id):
-    """📌 自動抓取股票名稱"""
+    """自動抓取股票名稱"""
     try:
         res = requests.get(f"https://tw.stock.yahoo.com/quote/{target_id}.TW", headers={"User-Agent": "Mozilla/5.0"}, timeout=5)
         match = re.search(r'<title>(.*?)\s*\(', res.text)
@@ -56,7 +57,7 @@ def get_stock_name(target_id):
     return ""
 
 def safe_get_fubon(url):
-    """📌 對付富邦老舊 SSL 憑證的降級爬蟲器"""
+    """對付富邦老舊 SSL 憑證的降級爬蟲器"""
     try:
         ctx = ssl.create_default_context()
         ctx.check_hostname = False
@@ -74,8 +75,9 @@ def safe_get_fubon(url):
         except:
             return ""
 
+@st.cache_data(ttl=3600, show_spinner=False)
 def fetch_fm(dataset, start_date, target_id=None, end_date=None):
-    """📌 FinMind API 擷取器 (已優化變數範圍)"""
+    """FinMind API 擷取器 (已優化變數範圍與快取)"""
     url = "https://api.finmindtrade.com/api/v4/data"
     params = {"dataset": dataset, "start_date": start_date}
     if target_id: params["data_id"] = target_id
@@ -97,6 +99,7 @@ def format_pledge_to_gas(df_summary, df_detail):
     if df_summary is None or df_summary.empty: return "▼▼▼ 18. 董監大股東質設 ▼▼▼, \n此區塊查無最新數據或無發行紀錄, \n"
     return format_to_gas(df_summary, "18. 董監大股東質設 (餘額與斷頭預警)") + format_to_gas(df_detail, "董監大股東質設 (異動明細)")
 
+@st.cache_data(ttl=3600, show_spinner=False)
 def scrape_director_holding(target_id):
     headers = {"User-Agent": "Mozilla/5.0"}
     debug_log = []
@@ -194,6 +197,7 @@ def get_dead_chip_info(date_str, dead_chip_input, dynamic_dict, static_val, chip
 # ==========================================
 # 鉅額交易掃描 (3日)
 # ==========================================
+@st.cache_data(ttl=3600, show_spinner=False)
 def scrape_block_trades(target_id, actual_dates):
     target_dates = actual_dates[:3] 
     block_data = []
@@ -274,7 +278,7 @@ def scrape_block_trades(target_id, actual_dates):
     return df, list(set(debug_log))
 
 # ==========================================
-# 📌 智能門檻計算引擎
+# 智能門檻計算引擎
 # ==========================================
 def get_smart_threshold(price, capital_bn, dead_float):
     if pd.isna(price) or price <= 0: return 1000 
@@ -362,7 +366,7 @@ def process_tdcc(df):
     df_percent = p_pct[['date']+lvls].rename(columns={'date': '日期'}).sort_values('日期', ascending=False)
     
     df_avg_base = pd.DataFrame({'date': p_unit['date']})
-    # 📌 優化：使用 np.nan 取代 pd.NA 避免 Pandas 除法報錯
+    # 優化：使用 np.nan 取代 pd.NA 避免 Pandas 除法報錯
     for l in lvls: df_avg_base[l] = (p_unit[l] / p_people[l].replace(0, np.nan)).fillna(0).round(2)
     df_avg = pd.merge(df_total[['date', '總均張']], df_avg_base, on='date').rename(columns={'date': '日期'}).sort_values('日期', ascending=False)
     
@@ -537,18 +541,14 @@ def fetch_single_day_branch(d, target_id):
         return res.get("data", [])
     except: return []
 
+@st.cache_data(ttl=3600, show_spinner=False)
 def fetch_fm_branch_fast_parallel(dates_list, target_id):
     all_data = []
-    progress_bar = st.progress(0); status_text = st.empty()
+    # 移除會造成平行運算卡頓的 progress_bar，直接在背景高效執行
     with concurrent.futures.ThreadPoolExecutor(max_workers=10) as executor:
         f_to_d = {executor.submit(fetch_single_day_branch, d, target_id): d for d in dates_list}
-        completed = 0
         for f in concurrent.futures.as_completed(f_to_d):
-            completed += 1
-            status_text.text(f"📥 下載分點資料... ({completed}/{len(dates_list)})")
-            progress_bar.progress(completed / len(dates_list))
             if f.result(): all_data.extend(f.result())
-    status_text.empty(); progress_bar.empty()
     return pd.DataFrame(all_data)
 
 def process_branch_diff(df_raw, actual_dates):
@@ -773,7 +773,7 @@ def process_cbas(df):
 # 執行主引擎
 # ==========================================
 if run_btn:
-    with st.spinner(f"正在擷取 {user_stock_id} 數據，並啟動全息雷達..."):
+    with st.spinner(f"正在擷取 {user_stock_id} 數據，並啟動全息雷達... (由於快取機制，第二次查詢將瞬間完成)"):
         
         stock_name = get_stock_name(user_stock_id)
         
@@ -836,7 +836,7 @@ if run_btn:
         df_cbas = process_cbas(df_cbas_raw[df_cbas_raw['cb_id'].astype(str).str.startswith(user_stock_id)]) if not df_cbas_raw.empty else pd.DataFrame()
         df_opt_inst = process_opt_inst(fetch_fm("TaiwanOptionInstitutionalInvestors", d_60, "TXO"))
         
-        # 📌 智能防呆排版引擎
+        # 智能防呆排版引擎
         def show(title, df, custom_class=""):
             st.markdown(f"#### {title}")
             if df is None or df.empty: 
@@ -885,6 +885,7 @@ if run_btn:
                 if left_cols:
                     styler = styler.set_properties(**{'text-align': 'left !important'}, subset=left_cols)
 
+                # Pandas 防呆寫法相容處理
                 try: styler = styler.hide(axis="index")
                 except: styler = styler.hide_index()
                 
@@ -942,7 +943,7 @@ if run_btn:
 
         st.divider()
         
-        # 📌 介面優化：使用 Expander 隱藏一大長串的 Prompt，避免佔用版面
+        # 介面優化：使用 Expander 隱藏一大長串的 Prompt，避免佔用版面
         with st.expander("📋 【點擊展開：給 Gemini 的量化分析資料包 (直接複製)】", expanded=False):
             name_str = f" {stock_name}" if stock_name else ""
             p = f"請依下面最新的盤後資料幫我分析 {user_stock_id}{name_str} 的量化籌碼，必須以我給的資料優先使用。\n\n"
