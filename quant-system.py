@@ -15,23 +15,22 @@ import urllib3
 urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
 
 # 設定網頁標題與佈局
-st.set_page_config(page_title="台股全息量化系統 (V17.2 完整修復版)", layout="wide")
+st.set_page_config(page_title="台股全息量化系統 (V18.0 完美客製版)", layout="wide")
 
 # 內建最新 Sponsor Token
 FINMIND_TOKEN = "eyJ0eXAiOiJKV1QiLCJhbGciOiJIUzI1NiJ9.eyJkYXRlIjoiMjAyNi0wNC0xMCAyMDoyMDo0NiIsInVzZXJfaWQiOiJUb25lMSIsImVtYWlsIjoidG9uZWhzaWVAZ21haWwuY29tIiwiaXAiOiI2MS42Mi43LjE5OCJ9.7s3-IrkfdiUyTvGiZQGESBUBAPHQTnd4pwYcn8_J-CY"
 
-# 📌 注入全局 CSS (數字靠左、其餘靠右，雷達診斷強制靠左)
+# 📌 注入全局 CSS (數字靠右、表頭置中，雷達診斷強制靠左)
 st.markdown("""
 <style>
+table.dataframe td { text-align: right !important; }
 table.dataframe th { text-align: center !important; }
-table.dataframe td.col-other { text-align: right !important; }
-table.dataframe td.col-num { text-align: left !important; }
 table.radar-table td:last-child { text-align: left !important; }
 </style>
 """, unsafe_allow_html=True)
 
 st.title("🤖 交易員實戰手冊：全息量化擷取系統")
-st.markdown("✅ **V17.2 專家雷達 (自動排版版)** | ✅ **鉅額交易雙擎掃描(15日)** | ✅ **富邦/Goodinfo 對時神盾**")
+st.markdown("✅ **V18.0 專家雷達** | ✅ **鉅額交易(3日)** | ✅ **專屬 Prompt 自動抓名**")
 
 # UI 輸入區
 col1, col2, col3, col4 = st.columns([1, 1, 1, 1])
@@ -52,6 +51,15 @@ st.divider()
 # ==========================================
 # 工具函式與多重死籌碼引擎
 # ==========================================
+
+def get_stock_name(target_id):
+    """📌 自動抓取股票名稱，用於 Prompt"""
+    try:
+        res = requests.get(f"https://tw.stock.yahoo.com/quote/{target_id}.TW", headers={"User-Agent": "Mozilla/5.0"}, timeout=5)
+        match = re.search(r'<title>(.*?)\s*\(', res.text)
+        if match: return match.group(1).strip()
+    except: pass
+    return ""
 
 def safe_get_fubon(url):
     """📌 對付富邦老舊 SSL 憑證的降級爬蟲器"""
@@ -96,7 +104,6 @@ def format_pledge_to_gas(df_summary, df_detail):
     return format_to_gas(df_summary, "18. 董監大股東質設 (餘額與斷頭預警)") + format_to_gas(df_detail, "董監大股東質設 (異動明細)")
 
 def scrape_director_holding(target_id):
-    """📌 V16.0 動態死籌碼引擎：Goodinfo 當月優先，富邦精算備援"""
     headers = {"User-Agent": "Mozilla/5.0"}
     debug_log = []
     dynamic_dict = {}
@@ -211,11 +218,11 @@ def get_dead_chip_info(date_str, dead_chip_input, dynamic_dict, static_val, chip
     return 0.0, "-"
 
 # ==========================================
-# 鉅額交易掃描 (支援上市/上櫃 + 近15日掃描)
+# 鉅額交易掃描 (🎯 V18.0 改為 3日掃描)
 # ==========================================
 def scrape_block_trades(target_id, actual_dates):
     """📌 鉅額雙引擎掃描 (支援 TWSE 上市 + TPEx 上/興櫃)"""
-    target_dates = actual_dates[:15]
+    target_dates = actual_dates[:3] # 🎯 改為 3 天
     block_data = []
     debug_log = []
     
@@ -599,9 +606,9 @@ def process_tdcc_dynamic(df_share, df_price, dead_chip_input, dynamic_dict, stat
     return out_df
 
 # ==========================================
-# 📌 1-2. V17.2 專家診斷引擎
+# 📌 1-2. V18.0 專家診斷引擎
 # ==========================================
-def get_expert_advice_v17(row, dead_chip_input, dynamic_dict, static_val):
+def get_expert_advice_v18(row, dead_chip_input, dynamic_dict, static_val):
     advice = []
     if pd.isna(row['1000張變動(%)']): return "⚪ 數據初始化..."
     
@@ -637,7 +644,7 @@ def get_expert_advice_v17(row, dead_chip_input, dynamic_dict, static_val):
 
     return " | ".join(advice) if advice else "🔵 趨勢盤整/無明顯訊號"
 
-def process_v17_ultimate_radar(df_wide, dead_chip_input, dynamic_dict, static_val, df_price):
+def process_v18_ultimate_radar(df_wide, dead_chip_input, dynamic_dict, static_val, df_price):
     if df_wide.empty or len(df_wide) < 2: return pd.DataFrame()
     
     df = df_wide.sort_values('日期', ascending=True).copy()
@@ -669,15 +676,15 @@ def process_v17_ultimate_radar(df_wide, dead_chip_input, dynamic_dict, static_va
     
     df['K_Value'] = np.where(df['中實戶人數變動'] > 0, (df['中實戶張數變動'] / df['中實戶人數變動']).round(1), 0.0)
     
-    df['V17_實戰診斷'] = df.apply(lambda row: get_expert_advice_v17(row, dead_chip_input, dynamic_dict, static_val), axis=1)
+    df['V18_實戰診斷'] = df.apply(lambda row: get_expert_advice_v18(row, dead_chip_input, dynamic_dict, static_val), axis=1)
     
-    report_columns = ['日期', '收盤價(元)', '總人數變動率(%)', '1000張變動(%)', '作戰區變動(%)', 'K_Value', 'V17_實戰診斷']
+    report_columns = ['日期', '收盤價(元)', '總人數變動率(%)', '1000張變動(%)', '作戰區變動(%)', 'K_Value', 'V18_實戰診斷']
     final_report = df[report_columns].sort_values('日期', ascending=False).fillna(0).head(10)
     final_report.columns = list(final_report.columns)
     return final_report
 
 # ==========================================
-# 📌 收盤價處理函式 (V17.2 補回)
+# 其餘處理函式
 # ==========================================
 def process_price(df):
     if df.empty: return pd.DataFrame()
@@ -778,15 +785,17 @@ def process_cbas(df):
 # 執行主引擎
 # ==========================================
 if run_btn:
-    with st.spinner(f"正在擷取 {stock_id} 數據，並啟動 V17.2 完整修復版雷達..."):
+    with st.spinner(f"正在擷取 {stock_id} 數據，並啟動 V18.0 完美客製版雷達..."):
+        
+        # 📌 自動抓取股票名稱
+        stock_name = get_stock_name(stock_id)
+        
         start_probe = (datetime.date.today() - datetime.timedelta(days=1095)).strftime("%Y-%m-%d")
         df_p_raw = fetch_fm("TaiwanStockPrice", start_probe)
         if df_p_raw.empty: st.error("查無股價資料"); st.stop()
         
         actual_dates = sorted(df_p_raw['date'].unique().tolist(), reverse=True)
         d_60 = actual_dates[59] if len(actual_dates) >= 60 else actual_dates[-1]
-        
-        # 📌 這裡就是之前不小心漏掉呼叫，現在已完整修復的 process_price！
         df_price = process_price(df_p_raw)
         
         # 📌 執行死籌碼多重爬蟲引擎
@@ -799,7 +808,7 @@ if run_btn:
         elif static_val > 0:
             st.toast(f"🤖 死籌碼引擎：啟動 [{chip_engine}] 備援，數值 {static_val}%", icon="🛡️")
         else:
-            st.error(f"⚠️ 死籌碼引擎全滅！可能遭防火牆阻擋。連線紀錄: {', '.join(debug_log)}。請於上方手動輸入死籌碼！")
+            st.error(f"⚠️ 死籌碼引擎全滅！連線紀錄: {', '.join(debug_log)}。請於上方手動輸入死籌碼！")
 
         df_branch_raw = fetch_fm_branch_fast_parallel(actual_dates[:60])
         df_branch_diff = process_branch_diff(df_branch_raw, actual_dates)
@@ -808,7 +817,7 @@ if run_btn:
         df_share_wide, df_share_unit, df_share_people, df_share_pct, df_share_avg = process_tdcc(df_share_raw)
         
         df_share_dynamic = process_tdcc_dynamic(df_share_wide, df_price, dead_chip_input, dynamic_dict, static_val, chip_engine, money_input, influence_input)
-        df_v17_radar = process_v17_ultimate_radar(df_share_wide, dead_chip_input, dynamic_dict, static_val, df_price)
+        df_v18_radar = process_v18_ultimate_radar(df_share_wide, dead_chip_input, dynamic_dict, static_val, df_price)
         
         df_twse, twse_log = scrape_block_trades(stock_id, actual_dates)
         df_margin = process_margin(fetch_fm("TaiwanStockMarginPurchaseShortSale", d_60))
@@ -846,32 +855,30 @@ if run_btn:
         df_cbas = process_cbas(df_cbas_raw[df_cbas_raw['cb_id'].astype(str).str.startswith(stock_id)]) if not df_cbas_raw.empty else pd.DataFrame()
         df_opt_inst = process_opt_inst(fetch_fm("TaiwanOptionInstitutionalInvestors", d_60, specific_id=False, target_id="TXO"))
 
-        st.success("✅ V17.2 引擎運算完畢！系統功能全部完整修復。")
+        st.success("✅ V18.0 引擎運算完畢！數字皆已強制靠右對齊，鉅額掃描縮時為 3 日。")
         
         def show(title, df, custom_class=""):
             st.markdown(f"#### {title}")
             if df is None or df.empty: 
                 st.warning("此區塊查無數據或無發行紀錄")
             else: 
-                html = df.to_html(index=False, border=1)
-                html = html.replace('<td>', '<td class="col-other">')
-                html = re.sub(r'<td class="col-other">\s*([-\+]?[\d,]+(\.\d+)?%?|-)\s*</td>', r'<td class="col-num">\1</td>', html)
-                html = f'<table class="dataframe {custom_class}"' + html.split('<table', 1)[1]
+                # 📌 運用 CSS 強制所有 td 靠右，不需要再用複雜的 regex 去換 class
+                html = df.to_html(classes=f'dataframe {custom_class}'.strip(), index=False, border=1)
                 st.markdown(html, unsafe_allow_html=True)
             
         show("▼▼▼ 1-1. 雙軸活大戶鎖碼判定表 (C-Value) ▼▼▼", df_share_dynamic)
-        show("▼▼▼ 1-2. V17.2 專家診斷雷達 (排版滿血版) ▼▼▼", df_v17_radar, custom_class="radar-table")
+        show("▼▼▼ 1-2. V18.0 專家診斷雷達 (滿血排版版) ▼▼▼", df_v18_radar, custom_class="radar-table")
         show("▼▼▼ 2-1. 集保分級 - 張數表 (近10週) ▼▼▼", df_share_unit)
         show("▼▼▼ 2-2. 集保分級 - 人數表 (近10週) ▼▼▼", df_share_people)
         show("▼▼▼ 2-3. 集保分級 - 比例表 (%) ▼▼▼", df_share_pct)
         show("▼▼▼ 2-4. 集保分級 - 均張表 ▼▼▼", df_share_avg)
         
         if df_twse.empty:
-            st.markdown(f"#### ▼▼▼ 3. 鉅額交易明細 (近15日) [來源：證交所/櫃買中心] ▼▼▼")
-            err_msg = ", ".join(twse_log) if twse_log else "本檔股票近 15 營業日無鉅額交易紀錄"
+            st.markdown(f"#### ▼▼▼ 3. 鉅額交易明細 (近3日) [來源：證交所/櫃買中心] ▼▼▼")
+            err_msg = ", ".join(twse_log) if twse_log else "本檔股票近 3 營業日無鉅額交易紀錄"
             st.warning(err_msg)
         else:
-            show("▼▼▼ 3. 鉅額交易明細 (近15日) [來源：證交所/櫃買中心] ▼▼▼", df_twse)
+            show("▼▼▼ 3. 鉅額交易明細 (近3日) [來源：證交所/櫃買中心] ▼▼▼", df_twse)
             
         show("▼▼▼ 4. 散戶資券餘額 [來源：FinMind] ▼▼▼", df_margin)
         show("▼▼▼ 5. 現股當沖明細 [來源：FinMind] ▼▼▼", df_day_trade)
@@ -903,14 +910,18 @@ if run_btn:
         show("▼▼▼ 24. CBAS 可轉債數據 [來源：FinMind] ▼▼▼", df_cbas)
 
         st.divider(); st.subheader("📋 【給 Gemini 的量化分析資料包】")
-        p = f"請幫我分析 {stock_id} 的量化籌碼。已套用 V17.2 專家雷達，大戶門檻與活籌碼槓桿已雙軸精算。\n\n"
+        
+        # 📌 全新動態起手式 Prompt
+        name_str = f" {stock_name}" if stock_name else ""
+        p = f"請依下面最新的盤後資料幫我分析 {stock_id}{name_str} 的量化籌碼，必須以我給的資料優先使用。\n\n"
+        
         p += format_to_gas(df_share_dynamic, "1-1. 雙軸活大戶鎖碼判定表 (C-Value)")
-        p += format_to_gas(df_v17_radar, "1-2. V17.2 專家診斷雷達 (排版滿血版)")
+        p += format_to_gas(df_v18_radar, "1-2. V18.0 專家診斷雷達")
         p += format_to_gas(df_share_unit, "2-1. 集保分級 - 張數表")
         p += format_to_gas(df_share_people, "2-2. 集保分級 - 人數表")
         p += format_to_gas(df_share_pct, "2-3. 集保分級 - 比例表 (%)")
         p += format_to_gas(df_share_avg, "2-4. 集保分級 - 均張表")
-        p += format_to_gas(df_twse, "3. 鉅額交易明細 (近15日)")
+        p += format_to_gas(df_twse, "3. 鉅額交易明細 (近3日)")
         p += format_to_gas(df_margin, "4. 散戶資券餘額")
         p += format_to_gas(df_day_trade, "5. 現股當沖明細")
         p += format_to_gas(df_inst, "6. 法人買賣超")
