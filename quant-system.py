@@ -328,14 +328,15 @@ def clean_level_by_math(x):
     else: return "1000張以上"
 
 def process_tdcc(df):
-    if df.empty: return pd.DataFrame(), pd.DataFrame(), pd.DataFrame(), pd.DataFrame(), pd.DataFrame()
+    if df.empty: return pd.DataFrame(), pd.DataFrame(), pd.DataFrame()
     df = df[~df['HoldingSharesLevel'].astype(str).str.contains('差異數')]
     df['LevelClean'] = df['HoldingSharesLevel'].apply(clean_level_by_math)
     df['people'] = pd.to_numeric(df['people'], errors='coerce').fillna(0).astype(int)
     df['percent'] = pd.to_numeric(df['percent'], errors='coerce').fillna(0)
     df['unit'] = (pd.to_numeric(df.get('unit', 0), errors='coerce').fillna(0) / 1000).round().astype(int)
     
-    dates = sorted(df['date'].unique(), reverse=True)[:10]
+    # 修改為近8週
+    dates = sorted(df['date'].unique(), reverse=True)[:8]
     df = df[df['date'].isin(dates)]
     df_levels = df[~df['LevelClean'].str.contains('合計|總計')]
     
@@ -364,18 +365,9 @@ def process_tdcc(df):
     df_unit = pd.merge(df_total[['date', '總張數']], p_unit[['date']+lvls], on='date').rename(columns={'date': '日期'}).sort_values('日期', ascending=False)
     df_people = pd.merge(df_total[['date', '總人數(人)']], p_people[['date']+lvls], on='date').rename(columns={'date': '日期'}).sort_values('日期', ascending=False)
     
-    df_percent = p_pct[['date']+lvls].rename(columns={'date': '日期'}).sort_values('日期', ascending=False)
-    df_percent = df_percent.rename(columns={l: f"{l}(%)" for l in lvls})
-    
-    df_avg_base = pd.DataFrame({'date': p_unit['date']})
-    for l in lvls: df_avg_base[l] = (p_unit[l] / p_people[l].replace(0, np.nan)).fillna(0).round(2)
-    df_avg = pd.merge(df_total[['date', '總均張']], df_avg_base, on='date').rename(columns={'date': '日期'}).sort_values('日期', ascending=False)
-    df_avg = df_avg.rename(columns={l: f"{l}_均張" for l in lvls})
-    
     df_wide.columns = list(df_wide.columns); df_unit.columns = list(df_unit.columns); df_people.columns = list(df_people.columns)
-    df_percent.columns = list(df_percent.columns); df_avg.columns = list(df_avg.columns)
     
-    return df_wide, df_unit, df_people, df_percent, df_avg
+    return df_wide, df_unit, df_people
 
 def process_tdcc_dynamic(df_share_wide, df_price, dead_chip_input, dynamic_dict, static_val, chip_engine):
     if df_share_wide.empty or df_price.empty: return pd.DataFrame()
@@ -496,7 +488,8 @@ def process_v24_ultimate_radar(df_wide, dead_chip_input, dynamic_dict, static_va
     df['V24_實戰診斷'] = df.apply(lambda row: get_expert_advice_v24(row, dead_chip_input, dynamic_dict, static_val), axis=1)
     
     report_columns = ['日期', '收盤價(元)', '總人數變動率(%)', '1000張變動(%)', '作戰區變動(%)', 'K_Value', 'V24_實戰診斷']
-    final_report = df[report_columns].sort_values('日期', ascending=False).fillna(0).head(10)
+    # 改為抓取近8週
+    final_report = df[report_columns].sort_values('日期', ascending=False).fillna(0).head(8)
     
     return final_report
 
@@ -510,6 +503,7 @@ def process_price(df):
     df_out['Trading_Volume'] = (pd.to_numeric(df_out['Trading_Volume'], errors='coerce').fillna(0) / 1000).round().astype(int)
     df_out = df_out.rename(columns={"date":"日期","Trading_Volume":"成交量(張)","Trading_money":"成交金額(千元)","open":"開盤價(元)","max":"最高價(元)","min":"最低價(元)","close":"收盤價(元)","spread":"漲跌(元)"})
     df_out["斷頭價(0.78)"] = (df_out["收盤價(元)"] * 0.78).round(2)
+    # 取全部排序，後續顯示時取10天
     df_res = df_out[['日期','成交量(張)','開盤價(元)','最高價(元)','最低價(元)','收盤價(元)','漲跌(元)','斷頭價(0.78)']].sort_values('日期', ascending=False)
     df_res.columns = list(df_res.columns)
     return df_res
@@ -530,7 +524,8 @@ def process_day_trading(df):
             df_out = df_out.drop(columns=[col])
     
     cols = ['日期'] + [c for c in df_out.columns if '張數' in c or '率' in c]
-    df_res = df_out[cols].tail(15).sort_values('日期', ascending=False)
+    # 改為10天
+    df_res = df_out[cols].tail(10).sort_values('日期', ascending=False)
     df_res.columns = list(df_res.columns)
     return df_res
 
@@ -555,7 +550,8 @@ def fetch_fm_branch_fast_parallel(dates_list, target_id):
 def process_branch_diff(df_raw, actual_dates):
     if df_raw.empty: return pd.DataFrame()
     out = []
-    for d in actual_dates[:15]:
+    # 改為10天
+    for d in actual_dates[:10]:
         df_day = df_raw[df_raw['date'] == d]
         if df_day.empty: continue
         buy_count = df_day[df_day['buy'] > 0]['securities_trader'].nunique()
@@ -685,9 +681,6 @@ def scrape_fubon_pledge(df_price_raw, target_id):
     if not df_all.empty: df_all.columns = list(df_all.columns)
     return df_sum_out, df_all
 
-# ==========================================
-# 📌 修正：融資改名為(萬元)，數值維持原數不變
-# ==========================================
 def process_margin(df):
     if df.empty: return pd.DataFrame()
     
@@ -696,12 +689,10 @@ def process_margin(df):
     
     for c in margin_cols:
         if c in df.columns: 
-            # 融資：直接使用原數值(不除以任何數字)
             df[c] = pd.to_numeric(df[c], errors='coerce').fillna(0).round().astype(int)
             
     for c in short_cols:
         if c in df.columns: 
-            # 融券：原數值不除，維持張數
             df[c] = pd.to_numeric(df[c], errors='coerce').fillna(0).round().astype(int)
             
     df = df.rename(columns={
@@ -719,7 +710,8 @@ def process_margin(df):
     df['融資增減(萬元)'] = df['融資餘額(萬元)'] - df.get('MarginPurchaseYesterdayBalance', 0)
     df['融券增減(張)'] = df['融券餘額(張)'] - df.get('ShortSaleYesterdayBalance', 0)
     
-    df_res = df[['日期','融資買進(萬元)','融資賣出(萬元)','融資現償(萬元)','融資餘額(萬元)','融資增減(萬元)','融券買進(張)','融券賣出(張)','融券餘額(張)','融券增減(張)','資券相抵(張)']].tail(15).sort_values('日期', ascending=False)
+    # 改為10天
+    df_res = df[['日期','融資買進(萬元)','融資賣出(萬元)','融資現償(萬元)','融資餘額(萬元)','融資增減(萬元)','融券買進(張)','融券賣出(張)','融券餘額(張)','融券增減(張)','資券相抵(張)']].tail(10).sort_values('日期', ascending=False)
     df_res.columns = list(df_res.columns)
     return df_res
 
@@ -737,7 +729,8 @@ def process_inst(df):
     d_sell = pd.to_numeric(pdf.get('sell_Dealer_self',0), errors='coerce').fillna(0) + pd.to_numeric(pdf.get('sell_Dealer_Hedging',0), errors='coerce').fillna(0)
     out['自營買賣超(張)'] = ((d_buy - d_sell) / 1000).round().astype(int)
     out['三大法人買賣超(張)'] = out['外資買賣超(張)'] + out['投信買賣超(張)'] + out['自營買賣超(張)']
-    df_res = out.tail(15).sort_values('日期', ascending=False)
+    # 改為10天
+    df_res = out.tail(10).sort_values('日期', ascending=False)
     df_res.columns = list(df_res.columns)
     return df_res
 
@@ -748,20 +741,8 @@ def process_fut_inst(df):
     pdf.columns.name = None
     for col in ['Foreign_Investor', 'Investment_Trust', 'Dealer']:
         if col not in pdf.columns: pdf[col] = 0
-    df_res = pdf.rename(columns={'date': '日期', 'Foreign_Investor': '外資多空(口)', 'Investment_Trust': '投信多空(口)', 'Dealer': '自營多空(口)'}).tail(15).sort_values('日期', ascending=False)
-    df_res.columns = list(df_res.columns)
-    return df_res
-
-def process_opt_inst(df):
-    if df.empty: return pd.DataFrame()
-    df['net_oi_amt'] = ((pd.to_numeric(df['long_open_interest_balance_amount'], errors='coerce').fillna(0) - pd.to_numeric(df['short_open_interest_balance_amount'], errors='coerce').fillna(0)) / 1000).round().astype(int)
-    pdf = df.pivot_table(index=['date', 'call_put'], columns='institutional_investors', values='net_oi_amt', fill_value=0).reset_index()
-    pdf.columns.name = None
-    for col in ['Foreign_Investor', 'Investment_Trust', 'Dealer']:
-        if col not in pdf.columns: pdf[col] = 0
-    pdf = pdf.rename(columns={'date': '日期', 'call_put': '契約', 'Foreign_Investor': '外資淨額(千元)', 'Investment_Trust': '投信淨額(千元)', 'Dealer': '自營商淨額(千元)'})
-    pdf['契約'] = pdf['契約'].map({'Call': '買權(Call)', 'Put': '賣權(Put)'}).fillna(pdf['契約'])
-    df_res = pdf[['日期', '契約', '外資淨額(千元)', '投信淨額(千元)', '自營商淨額(千元)']].tail(30).sort_values(['日期', '契約'], ascending=[False, True])
+    # 改為10天
+    df_res = pdf.rename(columns={'date': '日期', 'Foreign_Investor': '外資多空(口)', 'Investment_Trust': '投信多空(口)', 'Dealer': '自營多空(口)'}).tail(10).sort_values('日期', ascending=False)
     df_res.columns = list(df_res.columns)
     return df_res
 
@@ -769,7 +750,8 @@ def process_per(df):
     if df.empty: return pd.DataFrame()
     df_out = df.copy().rename(columns={"date":"日期","dividend_yield":"殖利率(%)","PER":"本益比(倍)","PBR":"淨值比(倍)"})
     for col in ["殖利率(%)", "本益比(倍)", "淨值比(倍)"]: df_out[col] = pd.to_numeric(df_out[col], errors='coerce').round(2)
-    df_res = df_out[['日期', '本益比(倍)', '淨值比(倍)', '殖利率(%)']].tail(15).sort_values('日期', ascending=False)
+    # 改為10天
+    df_res = df_out[['日期', '本益比(倍)', '淨值比(倍)', '殖利率(%)']].tail(10).sort_values('日期', ascending=False)
     df_res.columns = list(df_res.columns)
     return df_res
 
@@ -784,7 +766,8 @@ def process_div(df):
     if df.empty: return pd.DataFrame()
     df_out = df.rename(columns={"date": "公告日期", "year": "股利年份", "StockEarningsDistribution": "盈餘配股(元)", "StockStatutorySurplus": "公積配股(元)", "CashEarningsDistribution": "盈餘配息(元)", "CashStatutorySurplus": "公積配息(元)"})
     cols = [c for c in ["公告日期", "股利年份", "盈餘配息(元)", "公積配息(元)", "盈餘配股(元)", "公積配股(元)"] if c in df_out.columns]
-    df_res = df_out[cols].tail(10).sort_values('公告日期', ascending=False)
+    # 改為5年
+    df_res = df_out[cols].tail(5).sort_values('公告日期', ascending=False)
     df_res.columns = list(df_res.columns)
     return df_res
 
@@ -822,7 +805,7 @@ if run_btn:
         df_branch_diff = process_branch_diff(df_branch_raw, actual_dates)
         
         df_share_raw = fetch_fm("TaiwanStockHoldingSharesPer", d_60, user_stock_id)
-        df_share_wide, df_share_unit, df_share_people, df_share_pct, df_share_avg = process_tdcc(df_share_raw)
+        df_share_wide, df_share_unit, df_share_people = process_tdcc(df_share_raw)
         
         df_share_dynamic = process_tdcc_dynamic(df_share_wide, df_price, dead_chip_input, dynamic_dict, static_val, chip_engine)
         df_v24_radar = process_v24_ultimate_radar(df_share_wide, dead_chip_input, dynamic_dict, static_val, df_price)
@@ -861,7 +844,6 @@ if run_btn:
         df_disp = process_disp(fetch_fm("TaiwanStockDispositionSecuritiesPeriod", (datetime.date.today()-datetime.timedelta(days=180)).strftime("%Y-%m-%d"), user_stock_id))
         df_cbas_raw = fetch_fm("TaiwanStockConvertibleBondDailyOverview", actual_dates[0])
         df_cbas = process_cbas(df_cbas_raw[df_cbas_raw['cb_id'].astype(str).str.startswith(user_stock_id)]) if not df_cbas_raw.empty else pd.DataFrame()
-        df_opt_inst = process_opt_inst(fetch_fm("TaiwanOptionInstitutionalInvestors", d_60, "TXO"))
         
         # ==========================================
         # 📌 智能防呆排版引擎
@@ -898,10 +880,8 @@ if run_btn:
 
                 format_dict = {}
                 for c in df.columns:
-                    # 第一順位：確保明確需要小數點的指標
                     if any(kw in c for kw in ['率', '比', '價', '值', '報酬', 'C_Value', 'K_Value', 'C(%)', '變動', '佔比', '死籌碼', '億', '票面利率', '(%)', '均張']):
                         format_dict[c] = fmt_float
-                    # 第二順位：明確為整數的單位 (包含元、張)
                     elif any(kw in c for kw in ['口', '張', '股', '人', '次', '家', '元', '額', '量']):
                         format_dict[c] = fmt_int
                     else:
@@ -927,12 +907,10 @@ if run_btn:
                 if custom_class: html = html.replace('<table', f'<table class="{custom_class}"')
                 st.markdown(html, unsafe_allow_html=True)
             
-        show("▼▼▼ 1-1. 雙軸活大戶鎖碼判定表 (C-Value) ▼▼▼", df_share_dynamic)
-        show("▼▼▼ 1-2. 專家診斷雷達 ▼▼▼", df_v24_radar, custom_class="radar-table")
-        show("▼▼▼ 2-1. 集保分級 - 張數表 (近10週) ▼▼▼", df_share_unit)
-        show("▼▼▼ 2-2. 集保分級 - 人數表 (近10週) ▼▼▼", df_share_people)
-        show("▼▼▼ 2-3. 集保分級 - 比例表 (%) ▼▼▼", df_share_pct)
-        show("▼▼▼ 2-4. 集保分級 - 均張表 ▼▼▼", df_share_avg)
+        show("▼▼▼ 1-1. 雙軸活大戶鎖碼判定表 (C-Value) (近8週) ▼▼▼", df_share_dynamic)
+        show("▼▼▼ 1-2. 專家診斷雷達 (近8週) ▼▼▼", df_v24_radar, custom_class="radar-table")
+        show("▼▼▼ 2-1. 集保分級 - 張數表 (近8週) ▼▼▼", df_share_unit)
+        show("▼▼▼ 2-2. 集保分級 - 人數表 (近8週) ▼▼▼", df_share_people)
         
         if df_twse.empty:
             st.markdown(f"#### ▼▼▼ 3. 鉅額交易明細 (近3日) [來源：證交所/櫃買中心] ▼▼▼")
@@ -941,11 +919,11 @@ if run_btn:
         else:
             show("▼▼▼ 3. 鉅額交易明細 (近3日) [來源：證交所/櫃買中心] ▼▼▼", df_twse)
             
-        show("▼▼▼ 4. 散戶資券餘額 [來源：FinMind] ▼▼▼", df_margin)
-        show("▼▼▼ 5. 現股當沖明細 [來源：FinMind] ▼▼▼", df_day_trade)
-        show("▼▼▼ 6. 法人買賣超 [來源：FinMind] ▼▼▼", df_inst)
-        show("▼▼▼ 7. 收盤價量 [來源：FinMind] ▼▼▼", df_price.head(15))
-        show("▼▼▼ 8. 月營收 (百萬元) ▼▼▼", df_rev)
+        show("▼▼▼ 4. 散戶資券餘額 (近10天) [來源：FinMind] ▼▼▼", df_margin)
+        show("▼▼▼ 5. 現股當沖明細 (近10天) [來源：FinMind] ▼▼▼", df_day_trade)
+        show("▼▼▼ 6. 法人買賣超 (近10天) [來源：FinMind] ▼▼▼", df_inst)
+        show("▼▼▼ 7. 收盤價量 (近10天) [來源：FinMind] ▼▼▼", df_price.head(10))
+        show("▼▼▼ 8. 月營收 (百萬元) (近24個月) ▼▼▼", df_rev)
         
         show(f"▼▼▼ 9. 主力分點 - 今日 ({actual_dates[0]}) [來源：FinMind] ▼▼▼", df_b_today)
         show(f"▼▼▼ 10. 主力分點 - 前一日 ({actual_dates[1] if len(actual_dates)>1 else '無'}) [來源：FinMind] ▼▼▼", df_b_prev1)
@@ -955,7 +933,7 @@ if run_btn:
         show("▼▼▼ 14. 主力分點 - 近30日 [來源：FinMind] ▼▼▼", df_b_30)
         show("▼▼▼ 15. 主力分點 - 近60日 [來源：FinMind] ▼▼▼", df_b_60)
         show("▼▼▼ 16. 八大官股進出 (今日) [來源：FinMind] ▼▼▼", df_gov)
-        show("▼▼▼ 17. 買賣家數差明細 (近15日) [來源：系統自算] ▼▼▼", df_branch_diff)
+        show("▼▼▼ 17. 買賣家數差明細 (近10天) [來源：系統自算] ▼▼▼", df_branch_diff)
         
         st.markdown("#### ▼▼▼ 18. 董監大股東質設明細 [來源：富邦證券] ▼▼▼")
         if df_pledge_detail.empty: st.warning("此區塊查無數據")
@@ -963,10 +941,9 @@ if run_btn:
             if not df_pledge_summary.empty: st.markdown(df_pledge_summary.to_html(index=False, border=1), unsafe_allow_html=True)
             st.markdown(df_pledge_detail.to_html(index=False, border=1), unsafe_allow_html=True)
             
-        show("▼▼▼ 19. 台指期貨三大法人未平倉 (大盤) [來源：FinMind] ▼▼▼", df_fut)
-        show("▼▼▼ 20. 台指選擇權三大法人未平倉 (大盤) [來源：FinMind] ▼▼▼", df_opt_inst)
-        show("▼▼▼ 21. 歷年股利 [來源：FinMind] ▼▼▼", df_div)
-        show("▼▼▼ 22. 本益比、淨值比與殖利率 [來源：FinMind] ▼▼▼", df_per)
+        show("▼▼▼ 19. 台指期貨三大法人未平倉 (大盤) (近10天) [來源：FinMind] ▼▼▼", df_fut)
+        show("▼▼▼ 21. 歷年股利 (近5年) [來源：FinMind] ▼▼▼", df_div)
+        show("▼▼▼ 22. 本益比、淨值比與殖利率 (近10天) [來源：FinMind] ▼▼▼", df_per)
         show("▼▼▼ 23. 處置有價證券狀態 [來源：FinMind] ▼▼▼", df_disp)
         show("▼▼▼ 24. CBAS 可轉債數據 [來源：FinMind] ▼▼▼", df_cbas)
 
@@ -976,18 +953,16 @@ if run_btn:
             name_str = f" {stock_name}" if stock_name else ""
             p = f"請依下面最新的盤後資料幫我分析 {user_stock_id}{name_str} 的量化籌碼，必須以我給的資料優先使用。\n\n"
             
-            p += format_to_gas(df_share_dynamic, "1-1. 雙軸活大戶鎖碼判定表 (C-Value)")
-            p += format_to_gas(df_v24_radar, "1-2. 專家診斷雷達")
-            p += format_to_gas(df_share_unit, "2-1. 集保分級 - 張數表")
-            p += format_to_gas(df_share_people, "2-2. 集保分級 - 人數表")
-            p += format_to_gas(df_share_pct, "2-3. 集保分級 - 比例表 (%)")
-            p += format_to_gas(df_share_avg, "2-4. 集保分級 - 均張表")
+            p += format_to_gas(df_share_dynamic, "1-1. 雙軸活大戶鎖碼判定表 (C-Value) (近8週)")
+            p += format_to_gas(df_v24_radar, "1-2. 專家診斷雷達 (近8週)")
+            p += format_to_gas(df_share_unit, "2-1. 集保分級 - 張數表 (近8週)")
+            p += format_to_gas(df_share_people, "2-2. 集保分級 - 人數表 (近8週)")
             p += format_to_gas(df_twse, "3. 鉅額交易明細 (近3日)")
-            p += format_to_gas(df_margin, "4. 散戶資券餘額")
-            p += format_to_gas(df_day_trade, "5. 現股當沖明細")
-            p += format_to_gas(df_inst, "6. 法人買賣超")
-            p += format_to_gas(df_price.head(15), "7. 收盤價量")
-            p += format_to_gas(df_rev, "8. 月營收 (百萬元)")
+            p += format_to_gas(df_margin, "4. 散戶資券餘額 (近10天)")
+            p += format_to_gas(df_day_trade, "5. 現股當沖明細 (近10天)")
+            p += format_to_gas(df_inst, "6. 法人買賣超 (近10天)")
+            p += format_to_gas(df_price.head(10), "7. 收盤價量 (近10天)")
+            p += format_to_gas(df_rev, "8. 月營收 (百萬元) (近24個月)")
             p += format_to_gas(df_b_today, f"9. 主力分點 - 今日 ({actual_dates[0]})")
             p += format_to_gas(df_b_prev1, "10. 主力分點 - 前一日")
             p += format_to_gas(df_b_3, "11. 主力分點 - 近3日")
@@ -996,12 +971,11 @@ if run_btn:
             p += format_to_gas(df_b_30, "14. 主力分點 - 近30日")
             p += format_to_gas(df_b_60, "15. 主力分點 - 近60日")
             p += format_to_gas(df_gov, "16. 八大官股進出 (今日)")
-            p += format_to_gas(df_branch_diff, "17. 買賣家數差明細 (近15日)")
+            p += format_to_gas(df_branch_diff, "17. 買賣家數差明細 (近10天)")
             p += format_pledge_to_gas(df_pledge_summary, df_pledge_detail)
-            p += format_to_gas(df_fut, "19. 台指期貨三大法人未平倉 (大盤)")
-            p += format_to_gas(df_opt_inst, "20. 台指選擇權三大法人未平倉 (大盤)")
-            p += format_to_gas(df_div, "21. 歷年股利")
-            p += format_to_gas(df_per, "22. 本益比、淨值比與殖利率")
+            p += format_to_gas(df_fut, "19. 台指期貨三大法人未平倉 (大盤) (近10天)")
+            p += format_to_gas(df_div, "21. 歷年股利 (近5年)")
+            p += format_to_gas(df_per, "22. 本益比、淨值比與殖利率 (近10天)")
             p += format_to_gas(df_disp, "23. 處置有價證券狀態")
             p += format_to_gas(df_cbas, "24. CBAS 可轉債數據")
             
