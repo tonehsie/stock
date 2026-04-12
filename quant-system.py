@@ -364,11 +364,9 @@ def process_tdcc(df):
     df_unit = pd.merge(df_total[['date', '總張數']], p_unit[['date']+lvls], on='date').rename(columns={'date': '日期'}).sort_values('日期', ascending=False)
     df_people = pd.merge(df_total[['date', '總人數(人)']], p_people[['date']+lvls], on='date').rename(columns={'date': '日期'}).sort_values('日期', ascending=False)
     
-    # 修改：替 2-3 比例表加上 (%) 標記，以觸發小數點渲染
     df_percent = p_pct[['date']+lvls].rename(columns={'date': '日期'}).sort_values('日期', ascending=False)
     df_percent = df_percent.rename(columns={l: f"{l}(%)" for l in lvls})
     
-    # 修改：替 2-4 均張表加上 _均張 標記，以觸發小數點渲染
     df_avg_base = pd.DataFrame({'date': p_unit['date']})
     for l in lvls: df_avg_base[l] = (p_unit[l] / p_people[l].replace(0, np.nan)).fillna(0).round(2)
     df_avg = pd.merge(df_total[['date', '總均張']], df_avg_base, on='date').rename(columns={'date': '日期'}).sort_values('日期', ascending=False)
@@ -687,15 +685,33 @@ def scrape_fubon_pledge(df_price_raw, target_id):
     if not df_all.empty: df_all.columns = list(df_all.columns)
     return df_sum_out, df_all
 
+# ==========================================
+# 📌 修正：融資改為元(不除以1000)，融券為張(不除以1000)
+# ==========================================
 def process_margin(df):
     if df.empty: return pd.DataFrame()
     cols = ["MarginPurchaseBuy", "MarginPurchaseSell", "MarginPurchaseCashRepayment", "MarginPurchaseTodayBalance", "ShortSaleBuy", "ShortSaleSell", "ShortSaleCashRepayment", "ShortSaleTodayBalance", "OffsetLoanAndShort", "MarginPurchaseYesterdayBalance", "ShortSaleYesterdayBalance"]
     for c in cols:
-        if c in df.columns: df[c] = (pd.to_numeric(df[c], errors='coerce').fillna(0) / 1000).round().astype(int)
-    df = df.rename(columns={"date":"日期","MarginPurchaseBuy":"融資買進(張)","MarginPurchaseSell":"融資賣出(張)","MarginPurchaseCashRepayment":"融資現償(張)","MarginPurchaseTodayBalance":"融資餘額(張)","ShortSaleBuy":"融券買進(張)","ShortSaleSell":"融券賣出(張)","ShortSaleTodayBalance":"融券餘額(張)","OffsetLoanAndShort":"資券相抵(張)"})
-    df['融資增減(張)'] = df['融資餘額(張)'] - df['MarginPurchaseYesterdayBalance']
-    df['融券增減(張)'] = df['融券餘額(張)'] - df['ShortSaleYesterdayBalance']
-    df_res = df[['日期','融資買進(張)','融資賣出(張)','融資現償(張)','融資餘額(張)','融資增減(張)','融券買進(張)','融券賣出(張)','融券餘額(張)','融券增減(張)','資券相抵(張)']].tail(15).sort_values('日期', ascending=False)
+        if c in df.columns: 
+            # 直接使用原數值，不除以 1000
+            df[c] = pd.to_numeric(df[c], errors='coerce').fillna(0).round().astype(int)
+            
+    df = df.rename(columns={
+        "date":"日期",
+        "MarginPurchaseBuy":"融資買進(元)",
+        "MarginPurchaseSell":"融資賣出(元)",
+        "MarginPurchaseCashRepayment":"融資現償(元)",
+        "MarginPurchaseTodayBalance":"融資餘額(元)",
+        "ShortSaleBuy":"融券買進(張)",
+        "ShortSaleSell":"融券賣出(張)",
+        "ShortSaleTodayBalance":"融券餘額(張)",
+        "OffsetLoanAndShort":"資券相抵(張)"
+    })
+    
+    df['融資增減(元)'] = df['融資餘額(元)'] - df.get('MarginPurchaseYesterdayBalance', 0)
+    df['融券增減(張)'] = df['融券餘額(張)'] - df.get('ShortSaleYesterdayBalance', 0)
+    
+    df_res = df[['日期','融資買進(元)','融資賣出(元)','融資現償(元)','融資餘額(元)','融資增減(元)','融券買進(張)','融券賣出(張)','融券餘額(張)','融券增減(張)','資券相抵(張)']].tail(15).sort_values('日期', ascending=False)
     df_res.columns = list(df_res.columns)
     return df_res
 
@@ -840,7 +856,7 @@ if run_btn:
         df_opt_inst = process_opt_inst(fetch_fm("TaiwanOptionInstitutionalInvestors", d_60, "TXO"))
         
         # ==========================================
-        # 📌 智能防呆排版引擎 (已補足 2-3 和 2-4 的欄位偵測)
+        # 📌 智能防呆排版引擎
         # ==========================================
         def show(title, df, custom_class=""):
             st.markdown(f"#### {title}")
@@ -874,10 +890,10 @@ if run_btn:
 
                 format_dict = {}
                 for c in df.columns:
-                    # 第一順位：確保明確需要小數點的指標 (包含總人數變動率、比例(%)、均張)
+                    # 第一順位：確保明確需要小數點的指標
                     if any(kw in c for kw in ['率', '比', '價', '值', '報酬', 'C_Value', 'K_Value', 'C(%)', '變動', '佔比', '死籌碼', '億', '票面利率', '(%)', '均張']):
                         format_dict[c] = fmt_float
-                    # 第二順位：明確為整數的單位
+                    # 第二順位：明確為整數的單位 (包含元、張)
                     elif any(kw in c for kw in ['口', '張', '股', '人', '次', '家', '元', '額', '量']):
                         format_dict[c] = fmt_int
                     else:
